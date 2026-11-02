@@ -81,13 +81,21 @@ previous hole.
   hole 10 avoids linking the two nines but drops those transitions.
 - `player_skill` is a simple average, not a full ability model.
 
+## Findings so far
+
+- **No hot hand in scoring**: the previous hole does not change the expected next-hole score.
+- **A small style effect**: after a birdie the next hole is slightly more likely to be a par
+  (fewer birdies *and* fewer bogeys). After a bogey it is slightly less likely (more of both).
+  Each shift is under 1 percentage point.
+
 ## Status
 
 - [x] Data download, cleaning, and features
 - [x] Data quality checks (round completeness, course proxies, score labels)
 - [x] First models (`03_model.py`): no momentum in average score. Small variance-type
   effects mostly disappear with hole fixed effects (see `results/model_results.md`)
-- [x] Ordered and multinomial logit (`04_ordinal.py`): no overall shift. A slight lean toward
-  par after a birdie and away from par after a bogey
+- [x] Ordered and multinomial logit (`04_ordinal.py`): no overall shift. Formal tests (clustered
+  Wald tests, plus P(par) with hole fixed effects) show a small but significant style effect: next-hole
+  par is about +0.6 pp more likely after a birdie+ (p = 0.03) and about 0.6 pp less likely after a bogey+ (p = 0.02)
 - [ ] Streaks (last k holes), player heterogeneity, hidden Markov model
 - [ ] Extend to more seasons (see `00_check_seasons.R`)

@@ -70,6 +70,23 @@ Change vs previous par (percentage points):
 | birdie+ |   -0.021 |   -0.305 |  0.770 |  -0.245 |    -0.199 |
 | bogey+  |    0.054 |    0.220 | -0.845 |   0.446 |     0.126 |
 
+## 3. Formal tests
+
+Wald tests on the multinomial coefficients (player-clustered):
+
+|                                                |     df |    chi2 |   p_value |
+|:-----------------------------------------------|-------:|--------:|----------:|
+| H0: previous hole has no effect on any outcome | 8.0000 | 38.3007 |    0.0000 |
+| H0: previous birdie+ has no effect             | 4.0000 | 16.8708 |    0.0020 |
+| H0: previous bogey+ has no effect              | 4.0000 | 15.9092 |    0.0031 |
+
+Style test: change in P(par on next hole) vs previous par, with hole fixed effects + player_skill (linear probability model, player-clustered SEs):
+
+|             |   change_pp |   se_pp |   p_value |
+|:------------|------------:|--------:|----------:|
+| prev_birdie |      0.5627 |  0.2540 |    0.0267 |
+| prev_bogey  |     -0.6199 |  0.2662 |    0.0199 |
+
 ## Fit
 
 Ordered logit: log-likelihood -240,446.6, 10 parameters, AIC 480,913.2

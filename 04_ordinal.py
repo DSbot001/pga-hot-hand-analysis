@@ -140,6 +140,40 @@ def main():
     def diff_pp(pred):
         return (pred.loc[["birdie+", "bogey+"]] - pred.loc["par"]) * 100
 
+    # ---- Formal tests ---------------------------------------------------
+    # Wald tests on the multinomial coefficients with player-clustered SEs.
+    # (A likelihood-ratio test would treat holes as independent, but holes
+    # from the same player are correlated, so Wald + clustering is used.)
+    names = list(mres.cov_params().index)
+
+    def wald(vars_):
+        idx = [i for i, (_, v) in enumerate(names) if v in vars_]
+        R = np.zeros((len(idx), len(names)))
+        R[np.arange(len(idx)), idx] = 1
+        w = mres.wald_test(R, scalar=True)
+        return {"df": len(idx), "chi2": float(w.statistic), "p_value": float(w.pvalue)}
+
+    tests = pd.DataFrame({
+        "H0: previous hole has no effect on any outcome": wald(["prev_birdie", "prev_bogey"]),
+        "H0: previous birdie+ has no effect": wald(["prev_birdie"]),
+        "H0: previous bogey+ has no effect": wald(["prev_bogey"]),
+    }).T
+
+    # Style test: does P(par next) change? Strictest control, as in
+    # 03_model.py model C: hole fixed effects (players on the same hole in
+    # the same round are compared) + player_skill, linear probability model.
+    cell = (df.event_query + "|" + df["round"].astype(str) + "|"
+            + df.course_key + "|" + df.hole.astype(str))
+    d = pd.DataFrame({"par_next": (df.y == 2).astype(float),
+                      "prev_birdie": df.prev_birdie, "prev_bogey": df.prev_bogey,
+                      "player_skill": df.player_skill})
+    d = d - d.groupby(cell).transform("mean")
+    pres = sm.OLS(d.par_next, d[["prev_birdie", "prev_bogey", "player_skill"]]).fit(
+        cov_type="cluster", cov_kwds={"groups": clusters})
+    par_test = pd.DataFrame({
+        "change_pp": pres.params * 100, "se_pp": pres.bse * 100, "p_value": pres.pvalues,
+    }).loc[["prev_birdie", "prev_bogey"]]
+
     observed = (pd.crosstab(df.prev_cat, pd.Categorical.from_codes(df.y, LEVELS),
                             normalize="index").loc[PREV])
 
@@ -185,6 +219,17 @@ def main():
         "Change vs previous par (percentage points):",
         "",
         diff_pp(m_pred).to_markdown(floatfmt=".3f"),
+        "",
+        "## 3. Formal tests",
+        "",
+        "Wald tests on the multinomial coefficients (player-clustered):",
+        "",
+        tests.to_markdown(floatfmt=".4f"),
+        "",
+        "Style test: change in P(par on next hole) vs previous par, with hole "
+        "fixed effects + player_skill (linear probability model, player-clustered SEs):",
+        "",
+        par_test.to_markdown(floatfmt=".4f"),
         "",
         "## Fit",
         "",
