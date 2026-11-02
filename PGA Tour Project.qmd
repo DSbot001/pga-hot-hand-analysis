@@ -34,7 +34,7 @@ R loads the data into SQLite, SQL prepares the analysis variables, and Python mo
 
 ## Build the database
 
-R reads the saved golfastr responses and imports them into SQLite. Filtering, course proxies, previous-hole features, and difficulty controls are computed in `sql/analysis.sql`. Python can later query the same `analysis` view for modeling.
+R reads the saved golfastr responses and imports them into SQLite. Filtering, course proxies, previous-hole features, and difficulty controls are computed in `analysis.sql`. Python can later query the same `analysis` view for modeling. Run `02_build_database.R` first so that `pga_2025.sqlite` exists.
 
 ```{r}
 library(DBI)
@@ -42,6 +42,21 @@ library(RSQLite)
 
 pga_db <- dbConnect(SQLite(), "pga_2025.sqlite")
 
+```
+
+## Data coverage and excluded events
+
+Of the 49 events on the 2025 leaderboard, the Ryder Cup returned no hole data. Four more are excluded in `analysis.sql`: the Zurich Classic (two-player team event), Q-School, the Hero World Challenge (unofficial invitational), and the Barracuda Championship. The Barracuda uses modified Stableford scoring, and golfastr records Stableford points rather than strokes in `score`, so `score - par` is not a real score relative to par. Left in, it would make nearly every hole look like a birdie and create a large artificial post-birdie effect.
+
+```{r}
+dbGetQuery(pga_db, "
+  SELECT 'downloaded' AS stage, COUNT(DISTINCT event_query) AS n_events, COUNT(*) AS n_rows
+  FROM all_holes
+  UNION ALL
+  SELECT 'after exclusions', COUNT(DISTINCT event_query), COUNT(*) FROM clean
+  UNION ALL
+  SELECT 'analysis sample', COUNT(DISTINCT event_query), COUNT(*) FROM analysis
+")
 ```
 
 ## Check round sizes and extra rounds

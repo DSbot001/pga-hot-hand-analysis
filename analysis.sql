@@ -7,15 +7,23 @@ DROP VIEW IF EXISTS complete_rounds;
 DROP VIEW IF EXISTS clean;
 
 
-
-
+-- Excluded events:
+--   Zurich Classic: two-player team event, so scores are not individual.
+--   Q-School: qualifying tournament, not a regular TOUR event.
+--   Hero World Challenge: unofficial event with a small invitational field.
+--   Barracuda Championship: played under modified Stableford. golfastr's
+--     `score` column holds Stableford points, not strokes, so score - par
+--     is meaningless (event average to_par of about -3.7, and 99% of holes
+--     would count as birdie or better). Keeping it creates a large fake
+--     post-birdie effect (-0.43 vs -0.04). Without it the raw gap is ~0.
 CREATE VIEW clean AS
-SELECT * 
-FROM all_holes 
+SELECT *
+FROM all_holes
 WHERE event_query NOT IN (
  'Zurich Classic of New Orleans',
- 'PGA TOUR Q-School presented by Korn Ferry', 
- 'Hero World Challenge'
+ 'PGA TOUR Q-School presented by Korn Ferry',
+ 'Hero World Challenge',
+ 'Barracuda Championship'
 );
 
 

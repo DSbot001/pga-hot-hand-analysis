@@ -14,8 +14,10 @@ all_holes <- bind_rows(results, .id = "event_query")
 pga_db <- dbConnect(SQLite(), "pga_2025.sqlite")
 dbWriteTable(pga_db, "all_holes", all_holes, overwrite = TRUE)
 
-# dbExecute runs one statement at a time, so split the SQL file on semicolons
-sql <- paste(readLines("analysis.sql"), collapse = "\n")
+# dbExecute runs one statement at a time, so split the SQL file on semicolons.
+# Strip "--" comments first so a semicolon inside a comment can't break a statement.
+sql_lines <- sub("--.*$", "", readLines("analysis.sql"))
+sql <- paste(sql_lines, collapse = "\n")
 for (statement in strsplit(sql, ";")[[1]]) {
   if (nzchar(trimws(statement))) dbExecute(pga_db, statement)
 }
