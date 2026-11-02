@@ -18,6 +18,7 @@ Pipeline: **R** (download with the `golfastr` package) → **SQLite / SQL**
 | `02_build_database.R` | Loads the `.rds` into `pga_2025.sqlite` as table `all_holes`, then runs `analysis.sql`. |
 | `analysis.sql` | Builds the cleaning and feature views (see below). |
 | `03_model.py` | Python models: next-hole `to_par`, P(birdie+), and P(bogey+) after a birdie+, par, or bogey+, with three control specs. Writes `results/model_results.md`. |
+| `04_ordinal.py` | Ordered and multinomial logit for the full next-hole outcome (eagle+ / birdie / par / bogey / double+), with field birdie and bogey rates as hole controls. Writes `results/ordinal_results.md`. |
 | `PGA Tour Project.qmd` | Report: research question, data checks, and a first unadjusted comparison. |
 
 `pga_2025.sqlite` is generated locally and is git-ignored.
@@ -35,6 +36,7 @@ Then render `PGA Tour Project.qmd`, and run the models (needs `pandas`, `statsmo
 
 ```bash
 python 03_model.py
+python 04_ordinal.py   # about 1 minute
 ```
 
 Read the features from Python:
@@ -85,5 +87,7 @@ previous hole.
 - [x] Data quality checks (round completeness, course proxies, score labels)
 - [x] First models (`03_model.py`): no momentum in average score. Small variance-type
   effects mostly disappear with hole fixed effects (see `results/model_results.md`)
-- [ ] More advanced models (streaks, ordered/multinomial outcomes, player heterogeneity)
+- [x] Ordered and multinomial logit (`04_ordinal.py`): no overall shift. A slight lean toward
+  par after a birdie and away from par after a bogey
+- [ ] Streaks (last k holes), player heterogeneity, hidden Markov model
 - [ ] Extend to more seasons (see `00_check_seasons.R`)
