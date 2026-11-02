@@ -17,6 +17,7 @@ Pipeline: **R** (download with the `golfastr` package) → **SQLite / SQL**
 | `holes_2025_raw.rds` | Raw data: a list of 49 events (the Ryder Cup returned nothing). One row = one player, one hole, one round. |
 | `02_build_database.R` | Loads the `.rds` into `pga_2025.sqlite` as table `all_holes`, then runs `analysis.sql`. |
 | `analysis.sql` | Builds the cleaning and feature views (see below). |
+| `03_model.py` | Python models: next-hole `to_par`, P(birdie+), and P(bogey+) after a birdie+, par, or bogey+, with three control specs. Writes `results/model_results.md`. |
 | `PGA Tour Project.qmd` | Report: research question, data checks, and a first unadjusted comparison. |
 
 `pga_2025.sqlite` is generated locally and is git-ignored.
@@ -30,7 +31,11 @@ if needed. Then:
 source("02_build_database.R")   # builds pga_2025.sqlite
 ```
 
-Then render `PGA Tour Project.qmd`.
+Then render `PGA Tour Project.qmd`, and run the models (needs `pandas`, `statsmodels`, `tabulate`):
+
+```bash
+python 03_model.py
+```
 
 Read the features from Python:
 
@@ -78,5 +83,7 @@ previous hole.
 
 - [x] Data download, cleaning, and features
 - [x] Data quality checks (round completeness, course proxies, score labels)
-- [ ] **Modeling**: regress `to_par` on `prev_birdie` controlling for `hole_diff` and `player_skill`
+- [x] First models (`03_model.py`): no momentum in average score. Small variance-type
+  effects mostly disappear with hole fixed effects (see `results/model_results.md`)
+- [ ] More advanced models (streaks, ordered/multinomial outcomes, player heterogeneity)
 - [ ] Extend to more seasons (see `00_check_seasons.R`)
