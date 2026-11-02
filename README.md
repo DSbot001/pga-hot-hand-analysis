@@ -19,7 +19,7 @@ Pipeline: **R** (download with the `golfastr` package) → **SQLite / SQL**
 | `analysis.sql` | Builds the cleaning and feature views (see below). |
 | `03_model.py` | Python models: next-hole `to_par`, P(birdie+), and P(bogey+) after a birdie+, par, or bogey+, with three control specs. Writes `results/model_results.md`. |
 | `04_ordinal.py` | Ordered and multinomial logit for the full next-hole outcome (eagle+ / birdie / par / bogey / double+), with field birdie and bogey rates as hole controls. Writes `results/ordinal_results.md`. |
-| `PGA Tour Project.qmd` | Report: research question, data checks, and a first unadjusted comparison. |
+| `PGA Tour Project.qmd` | Full report: research question, data checks, results, and conclusion. |
 
 `pga_2025.sqlite` is generated locally and is git-ignored.
 
@@ -32,12 +32,14 @@ if needed. Then:
 source("02_build_database.R")   # builds pga_2025.sqlite
 ```
 
-Then render `PGA Tour Project.qmd`, and run the models (needs `pandas`, `statsmodels`, `tabulate`):
+Then run the models (needs `pandas`, `statsmodels`, `tabulate`), which write their tables to `results/`:
 
 ```bash
 python 03_model.py
 python 04_ordinal.py   # about 1 minute
 ```
+
+Finally, render `PGA Tour Project.qmd`. It has the data checks plus a Results and Conclusion section that reads the tables in `results/`.
 
 Read the features from Python:
 
