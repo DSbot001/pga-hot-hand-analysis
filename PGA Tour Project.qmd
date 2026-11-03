@@ -29,12 +29,12 @@ Each row represents one player's score on one hole in one tournament round. A ro
 
 For the analysis, we calculate `to_par = score - par` directly from the numeric scores.
 
-R loads the data into SQLite, SQL prepares the analysis variables, and Python modeling is the next step. The sections below check the data and prepare those variables; they do not yet provide an adjusted estimate of momentum.
+R loads the data into SQLite, SQL prepares the analysis variables, and Python fits the models (`03_model.py`, `04_ordinal.py`). The first sections below check the data and the variables; the **Results** section at the end reports the adjusted estimates.
 
 
 ## Build the database
 
-R reads the saved golfastr responses and imports them into SQLite. Filtering, course proxies, previous-hole features, and difficulty controls are computed in `analysis.sql`. Python can later query the same `analysis` view for modeling. Run `02_build_database.R` first so that `pga_2025.sqlite` exists.
+R reads the saved golfastr responses and imports them into SQLite. Filtering, course proxies, previous-hole features, and difficulty controls are computed in `analysis.sql`. The Python scripts query the same `analysis` view for modeling. Run `02_build_database.R` first so that `pga_2025.sqlite` exists.
 
 ```{r}
 library(DBI)
@@ -106,7 +106,7 @@ We calculate each score relative to par: `to_par = score - par`. A birdie is −
 
 For now, consecutive-hole comparisons stay within each nine, so holes 1 and 10 have no previous-hole value. Hole-number order is not always actual playing order; this rule avoids connecting the two nines but also omits valid transitions between them. A control is left missing when there are no other observations to calculate it from.
 
-The first query checks sample size and missing controls. The second is a simple, unadjusted comparison of next-hole scores. Differences here could still reflect the players or holes involved.
+The first query checks sample size and missing controls. The second is a simple, unadjusted comparison of next-hole scores. Differences here could still reflect the players or holes involved; the Results section adjusts for both.
 
 ```{r}
 dbGetQuery(pga_db, "
@@ -154,3 +154,104 @@ dbGetQuery(pga_db, "
 ")
 dbDisconnect(pga_db)
 ```
+
+## Results
+
+The models are fit in Python. Run `python 03_model.py` and `python 04_ordinal.py` after building the database. They write the tables in `results/`, and the chunks below read those files, so the report updates whenever the models are rerun.
+
+The previous hole is grouped into three states: **birdie or better**, **par**, and **bogey or worse**. Every comparison is against a previous par. Holes 1 and 10 have no previous hole and are not used.
+
+```{r}
+library(knitr)
+res <- function(f) read.csv(file.path("results", f), check.names = FALSE)
+```
+
+### Raw transition matrix
+
+Each row is the previous hole's result, and each column is the share of next-hole outcomes. This is the transition matrix of a first-order Markov chain over hole results. If there is no momentum, the rows should look the same once player and hole differences are removed.
+
+```{r}
+kable(res("transition_matrix.csv"), digits = 4)
+```
+
+The raw rows differ only slightly. After a birdie, the next hole has a few more pars; after a bogey, a few more bogeys. But these raw shares also reflect which holes and which players are involved, so they need adjustment.
+
+### Does the previous hole change the next-hole score?
+
+Three specifications control for player and hole differences in increasingly strict ways (OLS; for 0/1 outcomes, a linear probability model; standard errors clustered by player):
+
+- **A**: controls for `hole_diff` and `player_skill`.
+- **B**: player fixed effects, plus `hole_diff`.
+- **C**: hole fixed effects (event × round × course × hole), plus `player_skill`. Only players on the exact same hole in the same round are compared. This is the strictest specification and the one we rely on most.
+
+```{r}
+eff <- res("effects.csv")
+eff$ci <- sprintf("[%.4f, %.4f]", eff$ci_low, eff$ci_high)
+kable(eff[eff$outcome == "Next-hole to_par",
+          c("spec", "previous hole", "estimate", "se", "ci", "p_value")],
+      digits = 4, row.names = FALSE)
+```
+
+In every specification, the effect on the next-hole score is a few thousandths of a stroke and not statistically significant. **A birdie does not lead to a better next-hole score, and a bogey does not lead to a worse one.**
+
+### Birdie and bogey probabilities
+
+```{r}
+kable(eff[eff$outcome != "Next-hole to_par",
+          c("outcome", "spec", "previous hole", "estimate", "se", "p_value")],
+      digits = 4, row.names = FALSE)
+```
+
+Estimates are changes in probability (−0.0084 = −0.84 percentage points). After a par, the next hole is a birdie or better about 22% of the time and a bogey or worse about 16% of the time.
+
+Specifications A and B suggest that after a birdie, *both* birdies and bogeys become less likely. In specification C, these effects shrink by a factor of two to four. The reason is that `hole_diff` only controls a hole's average score, not how spread out its scores are. Course layout decides which holes follow which, for example an easy par 5 followed by a low-variance par 3. Comparing players on the same hole removes that layout effect.
+
+### The whole next-hole distribution
+
+Ordered and multinomial logit model all five next-hole outcomes at once (eagle or better, birdie, par, bogey, double bogey or worse). Fixed effects are impractical in a logit, so the hole is controlled by its leave-one-out field average, birdie rate, and bogey rate, plus `player_skill`.
+
+The **ordered logit** asks whether the previous hole shifts the whole distribution toward better or worse scores. A negative coefficient would mean momentum.
+
+```{r}
+kable(res("ordered_logit.csv"), digits = 4)
+```
+
+Neither coefficient is significant, and both odds ratios are essentially 1: **no overall shift**.
+
+The **multinomial logit** does not force a single direction, so it can detect a change in *style*, where birdies and bogeys move together. Below are the adjusted changes in each outcome's probability, in percentage points, relative to a previous par:
+
+```{r}
+kable(res("multinomial_change_pp.csv"), digits = 3)
+```
+
+After a birdie, every non-par outcome is slightly less likely, and par is about 0.8 points more likely. After a bogey, the pattern reverses.
+
+### Formal tests
+
+Wald tests on the multinomial coefficients use player-clustered standard errors. A likelihood-ratio test would treat holes as independent, but holes from the same player are correlated.
+
+```{r}
+kable(res("wald_tests.csv"), digits = 4)
+```
+
+The most direct test of style asks whether the chance of a par on the next hole changes, using the strictest control (hole fixed effects + `player_skill`):
+
+```{r}
+kable(res("par_test.csv"), digits = 4)
+```
+
+## Conclusion
+
+Using 2025 PGA TOUR hole-by-hole data (44 events, about 270,000 holes with a previous hole), we find:
+
+1. **No hot hand in scoring.** After accounting for player ability and hole difficulty, a birdie does not improve the expected score on the next hole, and a bogey does not worsen it. This holds in every specification.
+2. **A small, statistically significant change in style.** After a birdie, the next hole is about 0.6 percentage points more likely to be a par, with both birdies and bogeys slightly less likely. After a bogey, par is about 0.6 points less likely, with both birdies and bogeys slightly more likely. One possible reading: players play a little safer after a birdie and a little more aggressively after a bogey. The effect is under one percentage point, so it is a tendency rather than a meaningful change in scoring.
+
+As a golfer, the feeling of momentum after a birdie is real, but in this data it does not show up as better scoring on the next hole.
+
+### Limitations
+
+- One season of data. Results could differ in other years or on other tours.
+- `course_key` (the par sequence) is only a proxy for the course, and hole number is not always playing order. Transitions between the two nines are not used.
+- `player_skill` is a simple average from the player's other events, not a full ability model.
+- The model only looks one hole back. Longer streaks, or a hidden "hot" state lasting several holes (a hidden Markov model), are natural next steps.

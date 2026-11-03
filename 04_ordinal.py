@@ -241,6 +241,13 @@ def main():
         "",
     ]
     (OUT / "ordinal_results.md").write_text("\n".join(md))
+
+    # CSVs read by the Results section of PGA Tour Project.qmd
+    observed.to_csv(OUT / "transition_matrix.csv", index_label="previous_hole")
+    o_coef.loc[["prev_birdie", "prev_bogey"]].to_csv(OUT / "ordered_logit.csv", index_label="term")
+    diff_pp(m_pred).to_csv(OUT / "multinomial_change_pp.csv", index_label="previous_hole")
+    tests.to_csv(OUT / "wald_tests.csv", index_label="hypothesis")
+    par_test.to_csv(OUT / "par_test.csv", index_label="term")
     print("\n".join(md))
 
 
