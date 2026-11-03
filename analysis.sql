@@ -16,6 +16,9 @@ DROP VIEW IF EXISTS clean;
 --     is meaningless (event average to_par of about -3.7, and 99% of holes
 --     would count as birdie or better). Keeping it creates a large fake
 --     post-birdie effect (-0.43 vs -0.04). Without it the raw gap is ~0.
+
+
+
 CREATE VIEW clean AS
 SELECT *
 FROM all_holes
@@ -43,23 +46,17 @@ WHERE n_holes = 18;
 
 -- Par sequence is a course proxy, not a guaranteed unique course ID.
 CREATE VIEW round_courses AS
-SELECT DISTINCT
-    event_query,
-    round,
-    player_id,
+SELECT DISTINCT event_query, round, player_id,
     GROUP_CONCAT(CAST(par AS INTEGER), '') OVER (
         PARTITION BY event_query, round, player_id
         ORDER BY hole
-        ROWS BETWEEN UNBOUNDED PRECEDING
-                 AND UNBOUNDED FOLLOWING
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
     ) AS course_key
 FROM complete_rounds;
 
 
 CREATE VIEW scored_holes AS
-SELECT
-    h.*,
-    c.course_key,
+SELECT h.*, c.course_key,
     h.score - h.par AS to_par,
     CASE
         WHEN h.hole <= 9 THEN 1
@@ -77,21 +74,29 @@ JOIN round_courses AS c
 
 -- Preserve the original reset at holes 1 and 10.
 CREATE VIEW lagged_holes AS
-SELECT *, LAG(to_par) OVER (
- PARTITION BY player_id, tournament_id, round, nine ORDER BY hole
-) AS prev_to_par FROM scored_holes;
+SELECT *, 
+    LAG(to_par) OVER (
+        PARTITION BY player_id, tournament_id, round, nine 
+        ORDER BY hole) AS prev_to_par 
+FROM scored_holes;
+
+
+
 CREATE VIEW analysis AS
-SELECT *, CASE WHEN prev_to_par IS NULL THEN NULL
- WHEN prev_to_par <= -1 THEN 1 ELSE 0 END AS prev_birdie,
+SELECT *, 
+CASE WHEN prev_to_par IS NULL THEN NULL
+    WHEN prev_to_par <= -1 THEN 1 
+    ELSE 0 
+    END AS prev_birdie,
  1.0 * (field_sum - to_par) / NULLIF(n_field - 1, 0) AS hole_diff,
  1.0 * (tot_sum - event_sum) / NULLIF(tot_n - event_n, 0) AS player_skill
 FROM (
  SELECT *,
- COUNT(*) OVER (PARTITION BY event_query, round, course_key, hole) AS n_field,
- SUM(to_par) OVER (PARTITION BY event_query, round, course_key, hole) AS field_sum,
- SUM(to_par) OVER (PARTITION BY player_id) AS tot_sum,
- COUNT(*) OVER (PARTITION BY player_id) AS tot_n,
- SUM(to_par) OVER (PARTITION BY player_id, event_query) AS event_sum,
- COUNT(*) OVER (PARTITION BY player_id, event_query) AS event_n
+    COUNT(*) OVER (PARTITION BY event_query, round, course_key, hole) AS n_field,
+    SUM(to_par) OVER (PARTITION BY event_query, round, course_key, hole) AS field_sum,
+    SUM(to_par) OVER (PARTITION BY player_id) AS tot_sum,
+    COUNT(*) OVER (PARTITION BY player_id) AS tot_n,
+    SUM(to_par) OVER (PARTITION BY player_id, event_query) AS event_sum,
+    COUNT(*) OVER (PARTITION BY player_id, event_query) AS event_n
  FROM lagged_holes
 );
