@@ -6,6 +6,7 @@ DROP VIEW IF EXISTS round_courses;
 DROP VIEW IF EXISTS complete_rounds;
 DROP VIEW IF EXISTS clean;
 
+
 -- Excluded events:
 --   Zurich Classic: two-player team event, so scores are not individual.
 --   Q-School: qualifying tournament, not a regular TOUR event.
@@ -16,15 +17,18 @@ DROP VIEW IF EXISTS clean;
 --     would count as birdie or better). Keeping it creates a large fake
 --     post-birdie effect (-0.43 vs -0.04). Without it the raw gap is ~0.
 
+
+
 CREATE VIEW clean AS
 SELECT *
 FROM all_holes
 WHERE event_query NOT IN (
-    'Zurich Classic of New Orleans',
-    'PGA TOUR Q-School presented by Korn Ferry',
-    'Hero World Challenge',
-    'Barracuda Championship'
+ 'Zurich Classic of New Orleans',
+ 'PGA TOUR Q-School presented by Korn Ferry',
+ 'Hero World Challenge',
+ 'Barracuda Championship'
 );
+
 
 -- Keep rounds 1-4 with one valid score for each hole from 1 through 18.
 CREATE VIEW complete_rounds AS
@@ -40,21 +44,18 @@ WITH valid_rounds AS (
         AND COUNT(score) = 18
         AND COUNT(par) = 18
 )
-SELECT
-    h.*,
-    18 AS n_holes
+SELECT h.*, 18 AS n_holes
 FROM clean AS h
 JOIN valid_rounds AS v
     ON h.event_query = v.event_query
     AND h.round = v.round
     AND h.player_id = v.player_id;
 
+
+
 -- Par sequence is a course proxy, not a guaranteed unique course ID.
 CREATE VIEW round_courses AS
-SELECT DISTINCT
-    event_query,
-    round,
-    player_id,
+SELECT DISTINCT event_query, round, player_id,
     GROUP_CONCAT(CAST(par AS INTEGER), '') OVER (
         PARTITION BY event_query, round, player_id
         ORDER BY hole
@@ -62,10 +63,9 @@ SELECT DISTINCT
     ) AS course_key
 FROM complete_rounds;
 
+
 CREATE VIEW scored_holes AS
-SELECT
-    h.*,
-    c.course_key,
+SELECT h.*, c.course_key,
     h.score - h.par AS to_par,
     CASE
         WHEN h.hole <= 9 THEN 1
@@ -77,46 +77,35 @@ JOIN round_courses AS c
     AND h.round = c.round
     AND h.player_id = c.player_id;
 
--- Reset the previous-hole value at holes 1 and 10.
+
+
+
+
+-- Preserve the original reset at holes 1 and 10.
 CREATE VIEW lagged_holes AS
-SELECT
-    *,
+SELECT *, 
     LAG(to_par) OVER (
-        PARTITION BY player_id, tournament_id, round, nine
-        ORDER BY hole
-    ) AS prev_to_par
+        PARTITION BY player_id, tournament_id, round, nine 
+        ORDER BY hole) AS prev_to_par 
 FROM scored_holes;
 
+
+
 CREATE VIEW analysis AS
-SELECT
-    *,
-    CASE
-        WHEN prev_to_par IS NULL THEN NULL
-        WHEN prev_to_par <= -1 THEN 1
-        ELSE 0
+SELECT *, 
+CASE WHEN prev_to_par IS NULL THEN NULL
+    WHEN prev_to_par <= -1 THEN 1 
+    ELSE 0 
     END AS prev_birdie,
-    1.0 * (field_sum - to_par) / NULLIF(n_field - 1, 0) AS hole_diff,
-    1.0 * (tot_sum - event_sum) / NULLIF(tot_n - event_n, 0) AS player_skill
+ 1.0 * (field_sum - to_par) / NULLIF(n_field - 1, 0) AS hole_diff,
+ 1.0 * (tot_sum - event_sum) / NULLIF(tot_n - event_n, 0) AS player_skill
 FROM (
-    SELECT
-        *,
-        COUNT(*) OVER (
-            PARTITION BY event_query, round, course_key, hole
-        ) AS n_field,
-        SUM(to_par) OVER (
-            PARTITION BY event_query, round, course_key, hole
-        ) AS field_sum,
-        SUM(to_par) OVER (
-            PARTITION BY player_id
-        ) AS tot_sum,
-        COUNT(*) OVER (
-            PARTITION BY player_id
-        ) AS tot_n,
-        SUM(to_par) OVER (
-            PARTITION BY player_id, event_query
-        ) AS event_sum,
-        COUNT(*) OVER (
-            PARTITION BY player_id, event_query
-        ) AS event_n
-    FROM lagged_holes
+ SELECT *,
+    COUNT(*) OVER (PARTITION BY event_query, round, course_key, hole) AS n_field,
+    SUM(to_par) OVER (PARTITION BY event_query, round, course_key, hole) AS field_sum,
+    SUM(to_par) OVER (PARTITION BY player_id) AS tot_sum,
+    COUNT(*) OVER (PARTITION BY player_id) AS tot_n,
+    SUM(to_par) OVER (PARTITION BY player_id, event_query) AS event_sum,
+    COUNT(*) OVER (PARTITION BY player_id, event_query) AS event_n
+ FROM lagged_holes
 );
