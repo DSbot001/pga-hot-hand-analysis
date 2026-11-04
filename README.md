@@ -1,55 +1,70 @@
-# PGA Tour Momentum
+# PGA Hot Hand Analysis
 
-Does a birdie carry over? This project asks whether making **birdie or better
-on one hole is associated with a better score on the next hole**, after
-accounting for player ability and hole difficulty. It uses 2025 PGA TOUR
-hole-by-hole data.
+Does playing well on one hole help a golfer play better on the next?
 
-Pipeline: **R** (download with the `golfastr` package) → **SQLite / SQL**
-(cleaning and features) → **Python** (modeling, next step).
+In the world of golf, players often feel that one good hole can build confidence and lead to another. As both an NCAA Division I golfer and a data science student, I wanted to see whether this “hot hand” feeling shows up in the data, or whether apparent streaks can be explained by player ability and hole difficulty.
+
+The project uses 2025 PGA TOUR hole-by-hole data retrieved through the R package golfastr. It tests whether scoring a birdie or better, meaning completing a hole in fewer strokes than par, is associated with a better score on the next hole after accounting for those differences.
+
+## Pipeline
+
+The workflow starts in **R**, using the `golfastr` package to download the golf data. The data is then stored in a **SQLite** database, where **SQL** cleans the records and creates the variables used in the analysis. **Python** fits the statistical models and saves the results for the final report.
 
 ## Files
 
-| File | What it does |
-|---|---|
-| `00_check_seasons.R` | Probes 2015–2026 to see which seasons golfastr has hole data for (for future multi-season work). Not needed for the main pipeline. |
-| `01_download.R` | Downloads every 2025 event with `load_holes()` and saves the list to `holes_2025_raw.rds`. Optional, since the `.rds` is already in the repo. |
-| `holes_2025_raw.rds` | Raw data: a list of 49 events (the Ryder Cup returned nothing). One row = one player, one hole, one round. |
-| `02_build_database.R` | Loads the `.rds` into `pga_2025.sqlite` as table `all_holes`, then runs `analysis.sql`. |
-| `analysis.sql` | Builds the cleaning and feature views (see below). |
-| `03_model.py` | Python models: next-hole `to_par`, P(birdie+), and P(bogey+) after a birdie+, par, or bogey+, with three control specs. Writes `results/model_results.md`. |
-| `04_ordinal.py` | Ordered and multinomial logit for the full next-hole outcome (eagle+ / birdie / par / bogey / double+), with field birdie and bogey rates as hole controls. Writes `results/ordinal_results.md`. |
-| `PGA Tour Project.qmd` | Full report: research question, data checks, results, and conclusion. |
+The numbered scripts follow the main workflow, from creating database to fitting the models. The saved raw data is included, so you can start with `02_build_database.R` without downloading it again.
 
-`pga_2025.sqlite` is generated locally and is git-ignored.
+| File | Purpose |
+|---|---|
+| `01_download.R` | Uses `golfastr` to download the 2025 tournament data and save it as an R data file. |
+| `holes_2025_raw.rds` | Contains the downloaded data. Each hole record represents one player’s score on one hole in one round. |
+| `02_build_database.R` | Combines the downloaded tournament data, loads it into SQLite, and runs `analysis.sql` to prepare the analysis dataset. |
+| `analysis.sql` | Excludes unsuitable events, keeps complete rounds, links each hole to the previous hole, and calculates measures of player ability and hole difficulty. |
+| `03_model.py` | Tests whether the previous hole’s result predicts the next hole’s score or the probability of a birdie or bogey. Compares several ways of accounting for player and hole differences. |
+| `04_ordinal.py` | Examines all five next-hole score categories together and tests whether the previous result changes the overall distribution or the chance of making par. |
+| `results/` | Stores the model results as readable summaries and CSV tables used by the report. |
+| `PGA Tour Project.qmd` | Contains the full report, including the research background, data checks, model results, and conclusions. Renders to HTML. |
+| `PGA-Tour-Project.Rproj` | Opens the project in RStudio so the scripts run from the correct folder. |
+
+Running `02_build_database.R` creates `pga_2025.sqlite` locally. This generated database is excluded from Git because it can be rebuilt from the saved raw data and SQL script.
+
 
 ## How to run
 
-Open `PGA-Tour-Project.Rproj` in RStudio and install `DBI`, `RSQLite`, and `dplyr`
-if needed. Then:
+Run the steps below from the project folder. The raw data is already included, so there is no need to download it again.
+
+You will need R with `DBI`, `RSQLite`, and `dplyr`, Python with `numpy`, `pandas`, `statsmodels`, and `tabulate`, and Quarto to render the report.
+
+### 1. Build the database
+
+Run in R to load the saved data and prepare the analysis variables.
 
 ```r
-source("02_build_database.R")   # builds pga_2025.sqlite
+source("02_build_database.R")
 ```
 
-Then run the models (needs `pandas`, `statsmodels`, `tabulate`), which write their tables to `results/`:
+This creates `pga_2025.sqlite`.
+
+### 2. Run the models
+
+Run in a terminal to fit the models and save their results in `results/`.
 
 ```bash
 python 03_model.py
-python 04_ordinal.py   # about 1 minute
+python 04_ordinal.py
 ```
 
-Finally, render `PGA Tour Project.qmd`. It has the data checks plus a Results and Conclusion section that reads the tables in `results/`.
+### 3. Render the report
 
-Read the features from Python:
+Run in a terminal to generate the HTML report using the saved results.
 
-```python
-import sqlite3
-import pandas as pd
-
-with sqlite3.connect("pga_2025.sqlite") as con:
-    analysis = pd.read_sql_query("SELECT * FROM analysis", con)
+```bash
+quarto render "PGA Tour Project.qmd"
 ```
+
+To download a fresh copy of the raw data, install the R package `golfastr` and run `01_download.R` before these steps.
+
+
 
 ## SQL views (`analysis.sql`)
 
