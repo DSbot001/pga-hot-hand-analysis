@@ -8,7 +8,7 @@ editor: source
 
 ## The Purpose of the Project
 
-As a ncaa d1 college golfer, I was interested in whether the momentum / hot hand feeling during a round actually shows up in the data. A birdie feels like it should carry over. But maybe the next hole is just easier, or the player is simply having a good day. Our Research Question: **Is making a birdie or better associated with a better score on the next hole, after accounting for player ability and hole difficulty?** 
+In the world of golf, players often feel that one good hole can build confidence and lead to another. As both an NCAA Division I golfer and a data science student, I wanted to see whether this “hot hand” feeling shows up in the data, or whether apparent streaks can be explained by player ability and hole difficulty. And our research question is: **Is making a birdie or better associated with a better score on the next hole, after accounting for player ability and hole difficulty?**  
 
 ## Data and a little golf background
 
@@ -27,14 +27,13 @@ Each row represents one player's score on one hole in one tournament round. A ro
 | Triple bogey | +3 | 8 |
 | Other | A separate category checked against the recorded score | — |
 
-For the analysis, we calculate `to_par = score - par` directly from the numeric scores.
-
-R loads the data into SQLite, SQL prepares the analysis variables, and Python fits the models (`03_model.py`, `04_ordinal.py`). The first sections below check the data and the variables; the **Results** section at the end reports the adjusted estimates.
+For the analysis, we calculate `to_par = score - par` directly from the numeric scores. The sections below check the data and analysis variables before presenting the model results.
 
 
-## Build the database
+## Prepare the database
 
-R reads the saved golfastr responses and imports them into SQLite. Filtering, course proxies, previous-hole features, and difficulty controls are computed in `analysis.sql`. The Python scripts query the same `analysis` view for modeling. Run `02_build_database.R` first so that `pga_2025.sqlite` exists.
+Run `02_build_database.R` to load the saved data into SQLite and execute `analysis.sql`, which cleans the records and creates the analysis variables.
+
 
 ```{r}
 library(DBI)
@@ -44,57 +43,139 @@ pga_db <- dbConnect(SQLite(), "pga_2025.sqlite")
 
 ```
 
+
 ## Data coverage and excluded events
 
-Of the 49 events on the 2025 leaderboard, the Ryder Cup returned no hole data. Four more are excluded in `analysis.sql`: the Zurich Classic (two-player team event), Q-School, the Hero World Challenge (unofficial invitational), and the Barracuda Championship. The Barracuda uses modified Stableford scoring, and golfastr records Stableford points rather than strokes in `score`, so `score - par` is not a real score relative to par. Left in, it would make nearly every hole look like a birdie and create a large artificial post-birdie effect.
+Of the 49 events on the 2025 leaderboard, the Ryder Cup returned no hole data. We excluded four events with formats outside the scope of this analysis: Zurich Classic (team play), Q-School (qualifying), Hero World Challenge (unofficial invitational), and Barracuda Championship (Stableford points rather than stroke scores), leaving 44 events.
+
 
 ```{r}
 dbGetQuery(pga_db, "
-  SELECT 'downloaded' AS stage, COUNT(DISTINCT event_query) AS n_events, COUNT(*) AS n_rows
-  FROM all_holes
+  WITH counts AS (
+    SELECT
+      (SELECT COUNT(*) FROM all_holes) AS n_raw,
+      (SELECT COUNT(*) FROM clean) AS n_clean,
+      (SELECT COUNT(*) FROM clean WHERE round = 5) AS n_playoff,
+      (SELECT COUNT(*) FROM analysis) AS n_final
+  )
+  SELECT 'Downloaded records' AS stage,
+         NULL AS excluded,
+         n_raw AS remaining
+  FROM counts
   UNION ALL
-  SELECT 'after exclusions', COUNT(DISTINCT event_query), COUNT(*) FROM clean
+  SELECT 'Exclude four events',
+         n_raw - n_clean,
+         n_clean
+  FROM counts
   UNION ALL
-  SELECT 'analysis sample', COUNT(DISTINCT event_query), COUNT(*) FROM analysis
+  SELECT 'Exclude round 5',
+         n_playoff,
+         n_clean - n_playoff
+  FROM counts
+  UNION ALL
+  SELECT 'Keep complete rounds 1-4',
+         n_clean - n_playoff - n_final,
+         n_final
+  FROM counts
 ")
 ```
 
-## Check round sizes and extra rounds
+After excluding four ineligible events, 41 playoff records and 475 incomplete round records, 303,786 records remain for analysis.
 
-A player can withdraw before finishing a round, and data can also be missing. The first table counts how many player-rounds have each number of recorded holes across the included events. The second checks records labeled as round 5. Our current sample keeps rounds 1–4 with 18 recorded rows; other complete rounds from the same player remain eligible.
+## Data quality checks
+
+The checks below assess the final analysis dataset for duplicates, missing or invalid values, inconsistent event identifiers, incomplete rounds, and unexpected missing previous-hole scores. PASS indicates no issues were found; and REVIEW flags issues for inspection.
+
 
 ```{r}
-dbGetQuery(pga_db, "
-  SELECT n_holes, COUNT(*) AS n_player_rounds
-  FROM (
-    SELECT event_query, round, player_id, COUNT(*) AS n_holes
-    FROM clean GROUP BY event_query, round, player_id
-  ) GROUP BY n_holes ORDER BY n_player_rounds DESC LIMIT 20
-")
-dbGetQuery(pga_db, "
-  SELECT event_query, round, COUNT(*) AS n_rows
-  FROM clean WHERE round = 5 GROUP BY event_query, round
-")
+checks <- c(
+  "Duplicate hole records (rounds 1-4)" = "
+    SELECT COUNT(*) FROM (
+      SELECT 1 FROM clean WHERE round BETWEEN 1 AND 4
+      GROUP BY event_query, round, player_id, hole HAVING COUNT(*) > 1)",
+  
+  "Missing or out-of-range values" = "
+    SELECT COUNT(*) FROM clean
+    WHERE event_query IS NULL OR tournament_id IS NULL OR player_id IS NULL
+       OR round IS NULL OR round < 1
+       OR hole IS NULL OR hole NOT BETWEEN 1 AND 18
+       OR score IS NULL OR score <= 0
+       OR par IS NULL OR par NOT BETWEEN 3 AND 5",
+  
+  "Event names with more than one tournament ID" = "
+    SELECT COUNT(*) FROM (SELECT 1 FROM clean GROUP BY event_query
+      HAVING COUNT(DISTINCT tournament_id) > 1)",
+  
+  "Tournament IDs with more than one event name" = "
+    SELECT COUNT(*) FROM (SELECT 1 FROM clean GROUP BY tournament_id
+      HAVING COUNT(DISTINCT event_query) > 1)",
+  
+  "Retained rounds violating completeness rules" = "
+    SELECT COUNT(*) FROM (SELECT 1 FROM complete_rounds
+      GROUP BY event_query, round, player_id
+      HAVING round IS NULL OR round NOT BETWEEN 1 AND 4
+         OR COUNT(*) != 18 OR COUNT(DISTINCT hole) != 18
+         OR MIN(hole) != 1 OR MAX(hole) != 18
+         OR COUNT(score) != 18 OR COUNT(par) != 18)",
+  
+  "Previous-hole missingness breaks the within-nine rule" = "
+    SELECT COUNT(*) FROM analysis
+    WHERE (hole IN (1, 10) AND prev_to_par IS NOT NULL)
+       OR (hole NOT IN (1, 10) AND prev_to_par IS NULL)"
+)
+
+
+issues <- vapply(
+  checks,
+  function(q) dbGetQuery(pga_db, q)[[1]],
+  numeric(1)
+)
+
+knitr::kable(data.frame(
+  Check = names(checks),
+  Issues = unname(issues),
+  Status = ifelse(issues == 0, "PASS", "REVIEW"),
+  row.names = NULL
+))
 ```
+
 
 ## Check course proxies
 
-Some events use more than one course. We use the sequence of pars from holes 1–18 as a rough course identifier, so players on different layouts are not automatically compared as if they played the same hole. Different courses can share this sequence, so it is an imperfect proxy.
-
-The first query finds event-rounds with multiple par sequences. The second checks whether an 18-row player-round actually contains holes 1–18 without duplicates. This check reports problems; it does not remove them automatically.
-
 ```{r}
 dbGetQuery(pga_db, "
-  SELECT event_query, round, COUNT(DISTINCT course_key) AS n_courses
-  FROM round_courses GROUP BY event_query, round
-  HAVING COUNT(DISTINCT course_key) > 1 ORDER BY event_query, round
-")
-dbGetQuery(pga_db, "
-  SELECT event_query, round, player_id
-  FROM complete_rounds GROUP BY event_query, round, player_id
-  HAVING COUNT(DISTINCT hole) != 18 OR MIN(hole) != 1 OR MAX(hole) != 18
+  WITH expected_courses AS (
+    SELECT 'The American Express' AS event_query, 3 AS n_courses
+    UNION ALL
+    SELECT 'Farmers Insurance Open', 2
+    UNION ALL
+    SELECT 'AT&T Pebble Beach Pro-Am', 2
+    UNION ALL
+    SELECT 'The RSM Classic', 2
+  ),
+  observed AS (
+    SELECT event_query,
+           COUNT(DISTINCT course_key) AS n_course_proxies
+    FROM round_courses
+    GROUP BY event_query
+  )
+  SELECT e.event_query,
+         e.n_courses,
+         COALESCE(o.n_course_proxies, 0) AS n_course_proxies,
+         CASE
+           WHEN e.n_courses = COALESCE(o.n_course_proxies, 0)
+             THEN 'MATCH'
+           ELSE 'MISMATCH'
+         END AS status
+  FROM expected_courses AS e
+  LEFT JOIN observed AS o
+    ON e.event_query = o.event_query
+  ORDER BY e.event_query
 ")
 ```
+
+We use each round’s 18-hole par sequence as a course proxy to avoid comparing scores from different courses when estimating hole difficulty. Across all four multi-course events, the number of unique sequences matches the official course count. This supports the proxy’s use to keep scores from different courses separate.
+
 
 ## Analysis features
 

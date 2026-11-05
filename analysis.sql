@@ -14,8 +14,7 @@ DROP VIEW IF EXISTS clean;
 --   Barracuda Championship: played under modified Stableford. golfastr's
 --     `score` column holds Stableford points, not strokes, so score - par
 --     is meaningless (event average to_par of about -3.7, and 99% of holes
---     would count as birdie or better). Keeping it creates a large fake
---     post-birdie effect (-0.43 vs -0.04). Without it the raw gap is ~0.
+--     would count as birdie or better). 
 
 
 
@@ -44,6 +43,7 @@ WITH valid_rounds AS (
         AND COUNT(score) = 18
         AND COUNT(par) = 18
 )
+
 SELECT h.*, 18 AS n_holes
 FROM clean AS h
 JOIN valid_rounds AS v
@@ -88,7 +88,6 @@ SELECT *,
         PARTITION BY player_id, tournament_id, round, nine 
         ORDER BY hole) AS prev_to_par 
 FROM scored_holes;
-
 
 
 CREATE VIEW analysis AS
