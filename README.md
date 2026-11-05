@@ -8,7 +8,9 @@ The project uses 2025 PGA TOUR hole-by-hole data retrieved through the R package
 
 ## Pipeline
 
-The workflow starts in **R**, using the `golfastr` package to download the golf data. The data is then stored in a **SQLite** database, where **SQL** cleans the records and creates the variables used in the analysis. **Python** fits the statistical models and saves the results for the final report.
+- **R** downloads the tournament data with `golfastr` and loads the saved records into SQLite.
+- **SQL** cleans the records and creates the variables used in the analysis.
+- **Python** fits the statistical models and saves the results for the final report.
 
 ## Files
 
@@ -81,12 +83,24 @@ To download a fresh copy of the raw data, install the R package `golfastr` and r
    Holes 1 and 10 have none.
 6. **`analysis`**: final modeling table.
 
-| Column | Meaning |
-|---|---|
-| `to_par` | Outcome: strokes relative to par on this hole |
-| `prev_birdie` | 1 if the previous hole was birdie or better, 0 otherwise, NULL on holes 1 and 10 |
-| `hole_diff` | Leave-one-out field average `to_par` on the same event, round, course, and hole (lower = easier) |
-| `player_skill` | The player's average `to_par` in *other* events (lower = better). NULL if he played only one event |
+
+## Variables
+
+The key variables in the `analysis` view are listed below. Each row represents one player's score on one hole in one tournament round.
+
+| Variable | Definition | How to interpret it |
+|---|---|---|
+| `score` | The player's recorded number of strokes on the current hole. | Compare with `par` to calculate the score relative to par. |
+| `par` | The reference number of strokes for the current hole. | A score below par is better than par. |
+| `to_par` | `score - par` on the current hole. | Lower is better. A birdie is -1, par is 0, and a bogey is +1. |
+| `prev_to_par` | The player's `to_par` on the preceding hole within the same nine. | Lower means a better previous-hole result. Missing on holes 1 and 10. |
+| `prev_birdie` | An indicator for whether `prev_to_par` is -1 or lower. | 1 means birdie or better, including eagles. 0 means par or worse. Missing on holes 1 and 10. |
+| `hole_diff` | The average `to_par` of the other players in the analysis sample on the same event, round, course proxy, and hole. The current player's score is excluded. | Higher means harder relative to par. Negative values mean the other players averaged below par, and positive values mean they averaged above par. Missing if no other player is available for comparison. |
+| `player_skill` | The player's average `to_par` across holes in their other included events. The entire current event is excluded. | Lower indicates better scoring performance, despite the variable name. Missing if the player has no observations in other included events. |
+| `course_key` | The sequence of pars for holes 1 through 18 in a player-round. | A proxy used to distinguish courses within an event, not a guaranteed unique course identifier. |
+| `nine` | The group of nine holes containing the current hole. | 1 for holes 1-9 and 2 for holes 10-18. Previous-hole comparisons do not cross between these groups. |
+
+For example, `player_skill = -0.10` indicates better scoring performance than `+0.05`. A `hole_diff` of `+0.30` indicates a harder hole relative to par than `-0.30`. Neither measure is a field-adjusted strokes-gained statistic.
 
 Current sample: 44 events and 303,786 player-holes, of which about 270k have a
 previous hole.
@@ -115,4 +129,4 @@ previous hole.
   Wald tests, plus P(par) with hole fixed effects) show a small but significant style effect: next-hole
   par is about +0.6 pp more likely after a birdie+ (p = 0.03) and about 0.6 pp less likely after a bogey+ (p = 0.02)
 - [ ] Streaks (last k holes), player heterogeneity, hidden Markov model
-- [ ] Extend to more seasons (see `00_check_seasons.R`)
+
