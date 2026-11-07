@@ -96,11 +96,11 @@ The key variables in the `analysis` view are listed below. Each row represents o
 | `prev_to_par` | The player's `to_par` on the preceding hole within the same nine. | Lower means a better previous-hole result. Missing on holes 1 and 10. |
 | `prev_birdie` | An indicator for whether `prev_to_par` is -1 or lower. | 1 means birdie or better, including eagles. 0 means par or worse. Missing on holes 1 and 10. |
 | `hole_diff` | The average `to_par` of the other players in the analysis sample on the same event, round, course proxy, and hole. The current player's score is excluded. | Higher means harder relative to par. Negative values mean the other players averaged below par, and positive values mean they averaged above par. Missing if no other player is available for comparison. |
-| `player_skill` | The player's average `to_par` across holes in their other included events. The entire current event is excluded. | Lower indicates better scoring performance, despite the variable name. Missing if the player has no observations in other included events. |
+| `player_skill` | The player's strokes gained per hole in their other included events, where strokes gained on a hole is `hole_diff - to_par`. The entire current event is excluded. | Higher is better: strokes better than the field per hole. Missing if the player has no observations in other included events. |
 | `course_key` | The sequence of pars for holes 1 through 18 in a player-round. | A proxy used to distinguish courses within an event, not a guaranteed unique course identifier. |
 | `nine` | The group of nine holes containing the current hole. | 1 for holes 1-9 and 2 for holes 10-18. Previous-hole comparisons do not cross between these groups. |
 
-For example, `player_skill = -0.10` indicates better scoring performance than `+0.05`. A `hole_diff` of `+0.30` indicates a harder hole relative to par than `-0.30`. Neither measure is a field-adjusted strokes-gained statistic.
+For example, `player_skill = +0.10` means the player beat the field by 0.10 strokes per hole in his other events. A `hole_diff` of `+0.30` indicates a harder hole relative to par than `-0.30`.
 
 Current sample: 44 events and 303,786 player-holes, of which about 270k have a
 previous hole.
@@ -110,7 +110,7 @@ previous hole.
 - `course_key` can, in principle, match two different courses with the same par sequence.
 - Hole number is not always playing order (for example, two-tee starts). Resetting at
   hole 10 avoids linking the two nines but drops those transitions.
-- `player_skill` is a simple average, not a full ability model.
+- `player_skill` is strokes gained from other events. It does not capture form that changes during the season.
 
 ## Findings so far
 
@@ -123,8 +123,9 @@ previous hole.
 
 - [x] Data download, cleaning, and features
 - [x] Data quality checks (round completeness, course proxies, score labels)
-- [x] First models (`03_model.py`): no momentum in average score. Small variance-type
-  effects mostly disappear with hole fixed effects (see `results/model_results.md`)
+- [x] Main model (`03_model.py`): hole fixed effects + strokes-gained `player_skill`. No momentum in
+  average score or in birdie/bogey chances (see `results/model_results.md`). Player fixed effects
+  are not used because they bias lagged-outcome estimates downward.
 - [x] Ordered and multinomial logit (`04_ordinal.py`): no overall shift. Formal tests (clustered
   Wald tests, plus P(par) with hole fixed effects) show a small but significant style effect: next-hole
   par is about +0.6 pp more likely after a birdie+ (p = 0.03) and about 0.6 pp less likely after a bogey+ (p = 0.02)

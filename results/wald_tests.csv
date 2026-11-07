@@ -1,4 +1,4 @@
 hypothesis,df,chi2,p_value
-H0: previous hole has no effect on any outcome,8.0,38.30069247080422,6.6238265266933616e-06
-H0: previous birdie+ has no effect,4.0,16.870801537097783,0.002047916971601789
-H0: previous bogey+ has no effect,4.0,15.909156175759936,0.003143516603903958
+H0: previous hole has no effect on any outcome,8.0,37.75300842113172,8.361847879004848e-06
+H0: previous birdie+ has no effect,4.0,16.826182440209944,0.0020891670842437386
+H0: previous bogey+ has no effect,4.0,15.388454229859182,0.003959775847343997

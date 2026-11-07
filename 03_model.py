@@ -1,7 +1,7 @@
 """Next-hole analysis: does the previous hole's result predict the next one?
 
 Reads the `analysis` view from pga_2025.sqlite (built by 02_build_database.R)
-and writes results/model_results.md.
+and writes results/model_results.md and results/effects.csv.
 
 Previous-hole state (prev_cat), reference = par:
     birdie+  previous hole birdie or better (to_par <= -1)
@@ -13,16 +13,19 @@ Outcomes on the next hole:
     birdie_next  1 if birdie or better
     bogey_next   1 if bogey or worse
 
-Models (OLS, linear probability for the 0/1 outcomes, SEs clustered by player):
-    A. outcome ~ prev_cat + hole_diff + player_skill
-    B. same, with player fixed effects instead of player_skill
-       (robustness: absorbs all stable differences between players)
-    C. hole fixed effects (event x round x course x hole) + player_skill.
-       hole_diff only controls a hole's average score. For the 0/1 outcomes
-       a hole's birdie and bogey rates matter too, and those depend on
-       course layout (which hole follows which). The fixed effect compares
-       players on the exact same hole in the same round. This is the
-       strictest spec and the one to trust most.
+Model (OLS, linear probability for the 0/1 outcomes, SEs clustered by player):
+
+    outcome ~ prev_cat + hole fixed effects + player_skill
+
+    Hole fixed effects (one per event x round x course proxy x hole) compare
+    players on the exact same hole in the same round, so they control the
+    hole's average score and also its birdie and bogey rates.
+    player_skill is strokes gained per hole in the player's other events
+    (see analysis.sql). It is measured outside the current event, so it does
+    not contain the scores being modeled.
+
+    Player fixed effects are not used. With a lagged outcome they bias the
+    previous-hole coefficients downward, most for players with few events.
 """
 
 import sqlite3
@@ -80,31 +83,24 @@ def raw_table(df, by):
     return t.round(4)
 
 
-def fit(df, y, controls):
-    f = f"{y} ~ C(prev_cat, Treatment('par')) + {controls}"
-    return smf.ols(f, data=df).fit(
-        cov_type="cluster", cov_kwds={"groups": df.player_id}
-    )
-
-
-def fit_fe(df, y, groups, control):
-    """One-way fixed effects via within-group demeaning."""
+def fit_main(df, y, hole_cell):
+    """Hole fixed effects (within-hole demeaning) + player_skill."""
     d = pd.DataFrame({
         "y": df[y],
         "birdie": (df.prev_cat == "birdie+").astype(float),
         "bogey": (df.prev_cat == "bogey+").astype(float),
-        control: df[control],
+        "player_skill": df.player_skill,
     })
-    d = d - d.groupby(groups).transform("mean")
-    return smf.ols(f"y ~ 0 + birdie + bogey + {control}", data=d).fit(
+    d = d - d.groupby(hole_cell).transform("mean")
+    return smf.ols("y ~ 0 + birdie + bogey + player_skill", data=d).fit(
         cov_type="cluster", cov_kwds={"groups": df.player_id}
     )
 
 
-def row(model, name, label, outcome, spec):
+def row(model, name, label, outcome):
     est, se = model.params[name], model.bse[name]
     return {
-        "outcome": outcome, "spec": spec, "previous hole": label,
+        "outcome": outcome, "previous hole": label,
         "estimate": est, "se": se,
         "ci_low": est - 1.96 * se, "ci_high": est + 1.96 * se,
         "p_value": model.pvalues[name],
@@ -113,46 +109,29 @@ def row(model, name, label, outcome, spec):
 
 def main():
     df = load()
-    main_df = df.dropna(subset=["player_skill"])  # needs >= 2 events
+    model_df = df.dropna(subset=["player_skill"])  # needs >= 2 events
+    hole_cell = model_df.groupby(
+        ["event_query", "round", "course_key", "hole"], sort=False
+    ).ngroup()
 
-    rows, preds = [], []
+    rows = []
     for y, label in OUTCOMES.items():
-        m = fit(main_df, y, "hole_diff + player_skill")
-        for cat, nm in [("birdie+", "C(prev_cat, Treatment('par'))[T.birdie+]"),
-                        ("bogey+", "C(prev_cat, Treatment('par'))[T.bogey+]")]:
-            rows.append(row(m, nm, cat, label, "A: controls"))
-
-        # Adjusted levels: everyone's controls held at their actual values,
-        # previous-hole state switched to each category in turn.
-        for cat in CATS:
-            p = m.predict(main_df.assign(prev_cat=cat)).mean()
-            preds.append({"outcome": label, "previous hole": cat, "adjusted mean": p})
-
-        fe = fit_fe(df, y, df.player_id, "hole_diff")
-        rows.append(row(fe, "birdie", "birdie+", label, "B: player FE"))
-        rows.append(row(fe, "bogey", "bogey+", label, "B: player FE"))
-
-        hole_cell = (main_df.event_query + "|" + main_df["round"].astype(str) + "|"
-                     + main_df.course_key + "|" + main_df.hole.astype(str))
-        hfe = fit_fe(main_df, y, hole_cell, "player_skill")
-        rows.append(row(hfe, "birdie", "birdie+", label, "C: hole FE"))
-        rows.append(row(hfe, "bogey", "bogey+", label, "C: hole FE"))
-
+        m = fit_main(model_df, y, hole_cell)
+        rows.append(row(m, "birdie", "birdie+", label))
+        rows.append(row(m, "bogey", "bogey+", label))
+        rows.append(row(m, "player_skill", "player_skill", label))
     effects = pd.DataFrame(rows)
-    adjusted = pd.DataFrame(preds).pivot(
-        index="previous hole", columns="outcome", values="adjusted mean"
-    ).loc[CATS, list(OUTCOMES.values())]
 
     raw3 = raw_table(df, "prev_cat").loc[CATS]
     raw5 = raw_table(df, "prev_detail")
 
-    fmt = lambda x: f"{x:.4f}"
     md = [
         "# Next-hole results (2025 PGA TOUR)",
         "",
         f"Sample: {len(df):,} holes with a previous hole "
         f"({df.player_id.nunique():,} players, {df.event_query.nunique()} events). "
-        f"Model A uses the {len(main_df):,} with `player_skill` available.",
+        f"The model uses the {len(model_df):,} holes with `player_skill` available "
+        f"({model_df.player_id.nunique():,} players who played at least two events).",
         "",
         "## 1. Raw next-hole outcomes by previous hole",
         "",
@@ -162,19 +141,15 @@ def main():
         "",
         raw5.to_markdown(),
         "",
-        "## 2. Effects relative to a previous par (OLS, player-clustered SEs)",
+        "## 2. Effects relative to a previous par",
         "",
-        "A = controls for `hole_diff` and `player_skill`. "
-        "B = player fixed effects + `hole_diff`. "
-        "C = hole fixed effects (event x round x course x hole) + `player_skill` "
-        "(strictest, preferred). "
-        "Probability estimates are proportions: -0.0084 = -0.84 percentage points.",
+        "OLS with hole fixed effects (event x round x course proxy x hole) and "
+        "`player_skill` (strokes gained per hole in the player's other events). "
+        "Standard errors are clustered by player. "
+        "Probability estimates are proportions: -0.0084 = -0.84 percentage points. "
+        "The `player_skill` rows show the effect of one stroke gained per hole.",
         "",
         effects.to_markdown(index=False, floatfmt=".4f"),
-        "",
-        "## 3. Adjusted next-hole levels (model A)",
-        "",
-        adjusted.to_markdown(floatfmt=".4f"),
         "",
     ]
     (OUT / "model_results.md").write_text("\n".join(md))

@@ -9,7 +9,7 @@ Next-hole outcome (ordered, best to worst):
 Previous-hole state (reference = par): birdie+, par, bogey+
 
 Controls:
-    player_skill             player's average to_par in other events
+    player_skill             strokes gained per hole in other events
     hole_diff                leave-one-out field mean to_par on the same
                              event x round x course x hole
     field_birdie, field_bogey  leave-one-out field share of birdie-or-better /
@@ -159,8 +159,8 @@ def main():
         "H0: previous bogey+ has no effect": wald(["prev_bogey"]),
     }).T
 
-    # Style test: does P(par next) change? Strictest control, as in
-    # 03_model.py model C: hole fixed effects (players on the same hole in
+    # Style test: does P(par next) change? Same specification as the
+    # 03_model.py main model: hole fixed effects (players on the same hole in
     # the same round are compared) + player_skill, linear probability model.
     cell = (df.event_query + "|" + df["round"].astype(str) + "|"
             + df.course_key + "|" + df.hole.astype(str))

@@ -90,21 +90,33 @@ SELECT *,
 FROM scored_holes;
 
 
+-- hole_diff: leave-one-out field average to_par on the same event, round,
+--   course proxy and hole (higher = harder hole).
+-- player_skill: strokes gained per hole, averaged over the player's OTHER
+--   events. Strokes gained on a hole = hole_diff - to_par, so positive values
+--   mean better than the field. Leaving out the current event keeps the
+--   player's own scores in this event out of the skill measure.
 CREATE VIEW analysis AS
-SELECT *, 
-CASE WHEN prev_to_par IS NULL THEN NULL
-    WHEN prev_to_par <= -1 THEN 1 
-    ELSE 0 
-    END AS prev_birdie,
- 1.0 * (field_sum - to_par) / NULLIF(n_field - 1, 0) AS hole_diff,
- 1.0 * (tot_sum - event_sum) / NULLIF(tot_n - event_n, 0) AS player_skill
+SELECT *,
+ 1.0 * (tot_sg - event_sg) / NULLIF(tot_n - event_n, 0) AS player_skill
 FROM (
  SELECT *,
-    COUNT(*) OVER (PARTITION BY event_query, round, course_key, hole) AS n_field,
-    SUM(to_par) OVER (PARTITION BY event_query, round, course_key, hole) AS field_sum,
-    SUM(to_par) OVER (PARTITION BY player_id) AS tot_sum,
-    COUNT(*) OVER (PARTITION BY player_id) AS tot_n,
-    SUM(to_par) OVER (PARTITION BY player_id, event_query) AS event_sum,
-    COUNT(*) OVER (PARTITION BY player_id, event_query) AS event_n
- FROM lagged_holes
+    SUM(hole_diff - to_par) OVER (PARTITION BY player_id) AS tot_sg,
+    COUNT(hole_diff) OVER (PARTITION BY player_id) AS tot_n,
+    SUM(hole_diff - to_par) OVER (PARTITION BY player_id, event_query) AS event_sg,
+    COUNT(hole_diff) OVER (PARTITION BY player_id, event_query) AS event_n
+ FROM (
+  SELECT *,
+   CASE WHEN prev_to_par IS NULL THEN NULL
+       WHEN prev_to_par <= -1 THEN 1
+       ELSE 0
+       END AS prev_birdie,
+   1.0 * (field_sum - to_par) / NULLIF(n_field - 1, 0) AS hole_diff
+  FROM (
+   SELECT *,
+      COUNT(*) OVER (PARTITION BY event_query, round, course_key, hole) AS n_field,
+      SUM(to_par) OVER (PARTITION BY event_query, round, course_key, hole) AS field_sum
+   FROM lagged_holes
+  )
+ )
 );
