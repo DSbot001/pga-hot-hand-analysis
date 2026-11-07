@@ -84,7 +84,7 @@ After excluding four ineligible events, 41 playoff records and 475 incomplete ro
 
 ## Data quality checks
 
-The checks below assess the final analysis dataset for duplicates, missing or invalid values, inconsistent event identifiers, incomplete rounds, and unexpected missing previous-hole scores. PASS indicates no issues were found; and REVIEW flags issues for inspection.
+We check for duplicates, missing or invalid values, inconsistent event identifiers, incomplete rounds, and unexpected gaps in previous-hole scores. We also compare score labels with `score - par`.
 
 
 ```{r}
@@ -106,22 +106,37 @@ checks <- c(
     SELECT COUNT(*) FROM (SELECT 1 FROM clean GROUP BY event_query
       HAVING COUNT(DISTINCT tournament_id) > 1)",
   
-  "Tournament IDs with more than one event name" = "
+  "Tournament IDs with more than one event name" = " -- Each tournament ID should map to one event name.
     SELECT COUNT(*) FROM (SELECT 1 FROM clean GROUP BY tournament_id
       HAVING COUNT(DISTINCT event_query) > 1)",
   
-  "Retained rounds violating completeness rules" = "
+  "Retained rounds violating completeness rules" = " -- Check that each round has 18 holes and that the holes are numbered 1-18 with no duplicates or missing values.
     SELECT COUNT(*) FROM (SELECT 1 FROM complete_rounds
       GROUP BY event_query, round, player_id
       HAVING round IS NULL OR round NOT BETWEEN 1 AND 4
          OR COUNT(*) != 18 OR COUNT(DISTINCT hole) != 18
          OR MIN(hole) != 1 OR MAX(hole) != 18
          OR COUNT(score) != 18 OR COUNT(par) != 18)",
-  
-  "Previous-hole missingness breaks the within-nine rule" = "
+
+  "Previous-hole missingness breaks the within-nine rule" = " -- Only holes 1 and 10 should lack a previous score.
     SELECT COUNT(*) FROM analysis
     WHERE (hole IN (1, 10) AND prev_to_par IS NOT NULL)
-       OR (hole NOT IN (1, 10) AND prev_to_par IS NULL)"
+       OR (hole NOT IN (1, 10) AND prev_to_par IS NULL)",
+
+  "Score label mismatches" = " -- Match labels to score - par and expect OTHER at +4 or worse.
+    SELECT COUNT(*) FROM analysis
+    WHERE CASE
+      WHEN score_type = 'OTHER' THEN to_par < 4
+      ELSE to_par != CASE score_type
+        WHEN 'DOUBLE_EAGLE' THEN -3
+        WHEN 'EAGLE' THEN -2
+        WHEN 'BIRDIE' THEN -1
+        WHEN 'PAR' THEN 0
+        WHEN 'BOGEY' THEN 1
+        WHEN 'DOUBLE_BOGEY' THEN 2
+        WHEN 'TRIPLE_BOGEY' THEN 3
+      END
+    END"
 )
 
 
@@ -185,56 +200,51 @@ We calculate each score relative to par: `to_par = score - par`. A birdie is −
 - `hole_diff`: the other players' average score relative to par on the same event-round, course proxy, and hole. Lower values suggest an easier hole.
 - `player_skill`: the player's average score relative to par in the other included events. Lower values suggest better scoring, though this is a rough measure rather than a full ability estimate.
 
-For now, consecutive-hole comparisons stay within each nine, so holes 1 and 10 have no previous-hole value. Hole-number order is not always actual playing order; this rule avoids connecting the two nines but also omits valid transitions between them. A control is left missing when there are no other observations to calculate it from.
 
-The first query checks sample size and missing controls. The second is a simple, unadjusted comparison of next-hole scores. Differences here could still reflect the players or holes involved; the Results section adjusts for both.
 
 ```{r}
 dbGetQuery(pga_db, "
   SELECT COUNT(*) AS n_holes,
     SUM(prev_to_par IS NULL) AS missing_previous,
-    SUM(hole_diff IS NULL) AS missing_hole_diff,
     SUM(player_skill IS NULL) AS missing_player_skill,
     MIN(hole_diff) AS min_hole_diff, MAX(hole_diff) AS max_hole_diff,
     MIN(player_skill) AS min_player_skill, MAX(player_skill) AS max_player_skill
   FROM analysis
 ")
-dbGetQuery(pga_db, "
-  SELECT prev_birdie, COUNT(*) AS n, AVG(to_par) AS mean_next
-  FROM analysis WHERE prev_birdie IS NOT NULL
-  GROUP BY prev_birdie ORDER BY prev_birdie
-")
-```
 
-## Validate score labels
-
-Finally, we compare the recorded labels with `score - par`. For example, a row labeled BIRDIE should have a value of −1. The last query lists event-rounds with label mismatches for further inspection.
-
-```{r}
 dbGetQuery(pga_db, "
-  SELECT score_type, COUNT(*) AS n FROM analysis GROUP BY score_type
-")
-dbGetQuery(pga_db, "
-  SELECT score, par, score_type, COUNT(*) AS n
-  FROM analysis WHERE to_par <= -3 GROUP BY score, par, score_type
-")
-dbGetQuery(pga_db, "
-  WITH checked AS (
-    SELECT *, CASE
-      WHEN score_type = 'OTHER' THEN to_par < 4
-      ELSE to_par != CASE score_type
-        WHEN 'DOUBLE_EAGLE' THEN -3 WHEN 'EAGLE' THEN -2
-        WHEN 'BIRDIE' THEN -1 WHEN 'PAR' THEN 0 WHEN 'BOGEY' THEN 1
-        WHEN 'DOUBLE_BOGEY' THEN 2 WHEN 'TRIPLE_BOGEY' THEN 3
-      END
-    END AS mismatch FROM analysis
+  WITH previous_results AS (
+    SELECT
+      CASE
+        WHEN prev_to_par <= -1 THEN 'Birdie or better'
+        WHEN prev_to_par = 0 THEN 'Par'
+        ELSE 'Bogey or worse'
+      END AS previous_hole, to_par
+    FROM analysis
+    WHERE prev_to_par IS NOT NULL
   )
-  SELECT event_query, round, SUM(mismatch) AS bad, COUNT(*) AS total
-  FROM checked GROUP BY event_query, round
-  HAVING SUM(mismatch) > 0 ORDER BY bad DESC LIMIT 30
+  SELECT
+    previous_hole,
+    COUNT(*) AS n,
+    AVG(to_par) AS mean_next
+  FROM previous_results
+  GROUP BY previous_hole
+  ORDER BY CASE previous_hole
+    WHEN 'Birdie or better' THEN 1
+    WHEN 'Par' THEN 2
+    ELSE 3
+  END
 ")
 dbDisconnect(pga_db)
 ```
+
+The raw dataset does not identify each player’s starting hole. We therefore compare consecutive holes within each nine separately, leaving holes 1 and 10 without a previous-hole value. This excludes 33,754 records and leaves 270,032 observations for consecutive-hole comparisons.
+
+Another 14,670 records have no `player_skill` value because the player appears in only one included event. These records remain available for the raw comparison but are excluded from models that require this control.
+
+The raw comparison separates the previous hole into birdie or better, par, and bogey or worse. Average next-hole scores relative to par are −0.0406, −0.0446, and −0.0160, respectively. These differences do not account for player ability or hole difficulty, and they will be adjusted for in the models.
+
+
 
 ## Results
 
