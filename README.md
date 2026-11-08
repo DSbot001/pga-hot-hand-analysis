@@ -118,22 +118,11 @@ previous hole.
   hole 10 avoids linking the two nines but drops those transitions.
 - `player_skill` is strokes gained from other events. It does not capture form that changes during the season.
 
-## Findings so far
+## Conclusions
 
 - **No hot hand in scoring**: the previous hole does not change the expected next-hole score.
 - **A small style effect**: after a birdie the next hole is slightly more likely to be a par
   (fewer birdies *and* fewer bogeys). After a bogey it is slightly less likely (more of both).
   Each shift is under 1 percentage point.
 
-## Status
-
-- [x] Data download, cleaning, and features
-- [x] Data quality checks (round completeness, course proxies, score labels)
-- [x] Main model (`03_model.py`): hole fixed effects + strokes-gained `player_skill`. No momentum in
-  average score or in birdie/bogey chances (see `results/effects.csv`). Player fixed effects
-  are not used because they bias lagged-outcome estimates downward.
-- [x] Multinomial logit (`04_multinomial.py`). Clustered Wald tests show a small but significant
-  style effect: next-hole par is about +0.8 pp more likely after a birdie+ and about 0.85 pp less
-  likely after a bogey+ (p < 0.01)
-- [ ] Player heterogeneity, hidden Markov model
 
