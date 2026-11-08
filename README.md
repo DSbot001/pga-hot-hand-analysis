@@ -22,9 +22,9 @@ The numbered scripts follow the main workflow, from creating database to fitting
 | `holes_2025_raw.rds` | Contains the downloaded data. Each hole record represents one player’s score on one hole in one round. |
 | `02_build_database.R` | Combines the downloaded tournament data, loads it into SQLite, and runs `analysis.sql` to prepare the analysis dataset. |
 | `analysis.sql` | Excludes unsuitable events, keeps complete rounds, links each hole to the previous hole, and calculates measures of player ability and hole difficulty. |
-| `03_model.py` | Tests whether the previous hole’s result predicts the next hole’s score or the probability of a birdie or bogey. Compares several ways of accounting for player and hole differences. |
-| `04_multinomial.py` | Examines all five next-hole score categories together and tests whether the previous result changes the mix of outcomes or the chance of making par. |
-| `results/` | Stores the model results as readable summaries and CSV tables used by the report. |
+| `03_model.py` | Main model. Tests whether the previous hole’s result predicts the next hole’s score or the probability of a birdie or bogey, using hole fixed effects and `player_skill`. Also runs the robustness check on the skill measure. |
+| `04_multinomial.py` | Examines all five next-hole score categories together and tests whether the previous result changes the mix of outcomes. |
+| `results/` | Stores the model results as CSV tables read by the report. |
 | `PGA Tour Project.qmd` | Contains the full report, including the research background, data checks, model results, and conclusions. Renders to HTML. |
 | `PGA-Tour-Project.Rproj` | Opens the project in RStudio so the scripts run from the correct folder. |
 
@@ -35,7 +35,7 @@ Running `02_build_database.R` creates `pga_2025.sqlite` locally. This generated 
 
 Run the steps below from the project folder. The raw data is already included, so there is no need to download it again.
 
-You will need R with `DBI`, `RSQLite`, and `dplyr`, Python with `numpy`, `pandas`, `statsmodels`, and `tabulate`, and Quarto to render the report.
+You will need R with `DBI`, `RSQLite`, and `dplyr`, Python with `numpy`, `pandas`, and `statsmodels`, and Quarto to render the report.
 
 ### 1. Build the database
 
@@ -111,18 +111,51 @@ For example, `player_skill = +0.10` means the player beat the field by 0.10 stro
 Current sample: 44 events and 303,786 player-holes, of which about 270k have a
 previous hole.
 
-## Known limitations
 
-- `course_key` can, in principle, match two different courses with the same par sequence.
-- Hole number is not always playing order (for example, two-tee starts). Resetting at
-  hole 10 avoids linking the two nines but drops those transitions.
-- `player_skill` is strokes gained from other events. It does not capture form that changes during the season.
+## Models
+
+**Main model (`03_model.py`).** For each next-hole outcome (strokes relative to par,
+birdie or better, bogey or worse), an OLS regression with hole fixed effects:
+
+    outcome ~ birdie+_prev + bogey+_prev + hole fixed effects + player_skill
+
+- **Hole fixed effects** (event × round × course proxy × hole) compare players on the
+  exact same hole in the same round, controlling for its difficulty.
+- **`player_skill`** controls for ability, measured from the player's other events.
+- A previous par is the reference, and standard errors are clustered by player.
+- Player fixed effects are not used: with a lagged outcome they bias the
+  previous-hole estimates downward, most for players with few events.
+
+**Robustness check (`03_model.py`).** Refits the main model keeping only players with
+at least 2, 5, 10, 15, or 20 events, and once adding back one-event players with an
+indicator.
+
+**Multinomial logit (`04_multinomial.py`).** Models all five next-hole results
+(eagle or better, birdie, par, bogey, double bogey or worse) at once, with the hole's
+field average, birdie rate, and bogey rate plus `player_skill` as controls. Clustered
+Wald tests check whether the previous hole changes the mix of outcomes.
+
+
 
 ## Conclusions
 
-- **No hot hand in scoring**: the previous hole does not change the expected next-hole score.
-- **A small style effect**: after a birdie the next hole is slightly more likely to be a par
-  (fewer birdies *and* fewer bogeys). After a bogey it is slightly less likely (more of both).
-  Each shift is under 1 percentage point.
+- **No hot hand.** After accounting for hole difficulty and player skill, the next-hole score
+  after a birdie or better differs from the score after a par by less than 0.002 strokes, and no
+  change in birdie or bogey chances is statistically significant.
+- **A small change in style.** After a birdie, players seem to play slightly safer and make
+  about 0.8 percentage points more pars. After a bogey, they seem to play more aggressively,
+  with fewer pars and more birdies and bogeys. The shift is significant (Wald p < 0.01) but
+  small, and scores alone cannot show what players intended.
 
+## Limitations
 
+- One season of PGA TOUR data. Results could differ in other years, on other tours, or at
+  amateur and college levels.
+- `course_key` (the par sequence) is only a proxy for the course, and hole number is not always
+  playing order. Transitions between the two nines are not used.
+- `player_skill` is estimated from a limited number of holes, so it contains noise and misses
+  changes in form during the season. Players with only one event enter only the robustness check.
+- Only the previous hole is considered, not longer streaks.
+- Confidence, feel, and how well a player is striking the ball that day cannot be measured from
+  scores, so the results describe an association between consecutive holes, not the effect of
+  the previous hole alone.
