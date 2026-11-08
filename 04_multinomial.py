@@ -134,29 +134,9 @@ def main():
         "H0: previous bogey+ has no effect": wald(["prev_bogey"]),
     }).T
 
-    # Style test: does P(par next) change? Same specification as the
-    # 03_model.py main model: hole fixed effects (players on the same hole in
-    # the same round are compared) + player_skill, linear probability model.
-    cell = (df.event_query + "|" + df["round"].astype(str) + "|"
-            + df.course_key + "|" + df.hole.astype(str))
-    d = pd.DataFrame({"par_next": (df.y == 2).astype(float),
-                      "prev_birdie": df.prev_birdie, "prev_bogey": df.prev_bogey,
-                      "player_skill": df.player_skill})
-    d = d - d.groupby(cell).transform("mean")
-    pres = sm.OLS(d.par_next, d[["prev_birdie", "prev_bogey", "player_skill"]]).fit(
-        cov_type="cluster", cov_kwds={"groups": clusters})
-    par_test = pd.DataFrame({
-        "change_pp": pres.params * 100, "se_pp": pres.bse * 100, "p_value": pres.pvalues,
-    }).loc[["prev_birdie", "prev_bogey"]]
-
-    observed = (pd.crosstab(df.prev_cat, pd.Categorical.from_codes(df.y, LEVELS),
-                            normalize="index").loc[PREV])
-
     # CSVs read by the Results section of PGA Tour Project.qmd
-    observed.to_csv(OUT / "transition_matrix.csv", index_label="previous_hole")
     diff_pp(m_pred).to_csv(OUT / "multinomial_change_pp.csv", index_label="previous_hole")
     tests.to_csv(OUT / "wald_tests.csv", index_label="hypothesis")
-    par_test.to_csv(OUT / "par_test.csv", index_label="term")
 
 
 if __name__ == "__main__":

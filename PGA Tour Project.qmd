@@ -194,13 +194,17 @@ We use each round’s 18-hole par sequence as a course proxy to avoid comparing 
 
 ## Analysis features
 
-We calculate each score relative to par: `to_par = score - par`. A birdie is −1, par is 0, and a bogey is +1.
+The SQL views turn each hole score into the variables used in the analysis.
 
-- `prev_birdie`: whether the preceding hole was a birdie or better, including eagles.
-- `hole_diff`: the other players' average score relative to par on the same event-round, course proxy, and hole. Lower values suggest an easier hole.
-- `player_skill`: the player's strokes gained per hole in the other included events. Strokes gained on a hole is `hole_diff - to_par`, the number of strokes better than the rest of the field on that hole. Higher values mean a better player. Using only the other events keeps the scores being modeled out of the skill measure.
+| Variable | What it measures |
+|---|---|
+| `to_par` | Score minus par. A birdie is −1, par is 0, and a bogey is +1. |
+| `prev_to_par` | The same player's score relative to par on the preceding hole within the same nine. |
+| `hole_diff` | The other players' average `to_par` on the same hole in the same event, round, and course proxy. Higher values indicate a harder hole. |
+| `sg` | Strokes gained against the field on that hole, calculated as `hole_diff - to_par`. Positive values mean the player scored better than the other players' average. |
+| `player_skill` | The player's average `sg` per hole across their other included events. Higher values indicate better scoring relative to the field. |
 
-
+We estimate `player_skill` from the player's other events. This keeps the scores we are trying to explain out of the skill estimate.
 
 ```{r}
 dbGetQuery(pga_db, "
@@ -212,6 +216,13 @@ dbGetQuery(pga_db, "
   FROM analysis
 ")
 
+```
+
+The data do not identify each player's starting hole. We link consecutive holes within each nine and leave the previous score blank for holes 1 and 10. This leaves 270,032 records for the raw comparisons.
+
+Of those records, 13,040 belong to the 338 players who appear in only one included event and have no `player_skill` value. The main model uses the remaining 256,992 records from 354 players. The scoring sensitivity check below adds the one-event players back.
+
+```{r}
 dbGetQuery(pga_db, "
   WITH previous_results AS (
     SELECT
@@ -238,13 +249,9 @@ dbGetQuery(pga_db, "
 dbDisconnect(pga_db)
 ```
 
-The raw dataset does not identify each player’s starting hole. We therefore compare consecutive holes within each nine separately, leaving holes 1 and 10 without a previous-hole value. This excludes 33,754 records and leaves 270,032 observations for consecutive-hole comparisons.
-
-Another 14,670 records have no `player_skill` value because the player appears in only one included event. These records remain available for the raw comparison but are excluded from models that require this control.
-
-The raw comparison separates the previous hole into birdie or better, par, and bogey or worse. Average next-hole scores relative to par are −0.0406, −0.0446, and −0.0160, respectively. These differences do not account for player ability or hole difficulty, and they will be adjusted for in the models.
 
 
+The raw comparison averages next-hole scores by previous-hole result, pooling all players and holes. After a birdie or better, a par, and a bogey or worse, the next-hole averages are −0.0406, −0.0446, and −0.0160 strokes relative to par. The adjusted comparison accounts for player ability using player_skill and uses hole fixed effects to compare players on the same hole within the same event, round, and course group. A hole fixed effect gives each of these holes its own baseline score, so the model only looks at how a player did relative to the others who played that exact hole that day. Differences in hole difficulty, such as pin position, wind, or a par 5 that plays easy, are absorbed by the baseline and cannot be mistaken for momentum.
 
 ## Results
 
@@ -257,17 +264,7 @@ library(knitr)
 res <- function(f) read.csv(file.path("results", f), check.names = FALSE)
 ```
 
-### Raw transition matrix
-
-Each row is the previous hole's result, and each column is the share of next-hole outcomes. This is the transition matrix of a first-order Markov chain over hole results. If there is no momentum, the rows should look the same once player and hole differences are removed.
-
-```{r}
-kable(res("transition_matrix.csv"), digits = 4)
-```
-
-The raw rows differ only slightly. After a birdie, the next hole has a few more pars; after a bogey, a few more bogeys. But these raw shares also reflect which holes and which players are involved, so they need adjustment.
-
-### Does the previous hole change the next-hole score?
+### Linear model with hole fixed effects
 
 The model accounts for the three parts of the question at once:
 
@@ -275,78 +272,59 @@ $$
 y_{i,h} = \beta_1 \, \text{birdie+}_{\text{prev}} + \beta_2 \, \text{bogey+}_{\text{prev}} + \alpha_{\text{hole}} + \gamma \, \text{player\_skill}_i + \varepsilon_{i,h}
 $$
 
-- **Hole difficulty:** a hole fixed effect $\alpha_{\text{hole}}$ for each event, round, course proxy, and hole. Players are compared with others on the exact same hole in the same round. This controls the hole's average score and also its birdie and bogey rates.
-- **Player ability:** `player_skill`, the player's strokes gained per hole in his other events.
-- **Momentum:** $\beta_1$ and $\beta_2$ compare the next hole after a birdie or better, or a bogey or worse, with the next hole after a par.
+- **Hole difficulty.** A fixed effect gives each combination of event, round, course proxy, and hole its own baseline. The model compares players within those groups.
+- **Player ability.** `player_skill` measures the player's average strokes gained per hole against the field in their other events.
+- **Previous-hole result.** $\beta_1$ and $\beta_2$ compare the next hole after a birdie or better and after a bogey or worse with the next hole after a par.
 
-Standard errors are clustered by player. The model uses the 256,992 observations with `player_skill` available.
-
-We do not use player fixed effects for ability. The previous hole's score is part of the player's own average, so a player fixed effect would push the previous-hole estimates downward even with no momentum. The bias is largest for players with few events, and more than half of the players in the data played only one event. A skill measure from other events avoids this problem.
+Standard errors are clustered by player. Estimating skill from other events avoids using the same scores both to measure ability and to estimate the relationship between consecutive holes.
 
 ```{r}
 eff <- res("effects.csv")
 eff$ci <- sprintf("[%.4f, %.4f]", eff$ci_low, eff$ci_high)
-kable(eff[eff$outcome == "Next-hole to_par",
-          c("previous hole", "estimate", "se", "ci", "p_value")],
-      digits = 4, row.names = FALSE)
-```
-
-Compared with a previous par, the next-hole score is estimated to be 0.0019 strokes lower after a birdie or better and 0.0016 strokes higher after a bogey or worse. Both 95% confidence intervals include zero. For comparison, one stroke gained per hole in `player_skill` lowers the next-hole score by about 0.74 strokes, so the model does pick up real differences between players.
-
-### Birdie and bogey probabilities
-
-```{r}
-kable(eff[eff$outcome != "Next-hole to_par" & eff$`previous hole` != "player_skill",
+kable(eff[eff$`previous hole` != "player_skill",
           c("outcome", "previous hole", "estimate", "se", "ci", "p_value")],
       digits = 4, row.names = FALSE)
 ```
 
-Estimates are changes in probability (−0.0084 = −0.84 percentage points). After a par, the next hole is a birdie or better about 22% of the time and a bogey or worse about 16% of the time.
+The first two rows are in strokes; the probability rows are proportions (−0.0028 = −0.28 percentage points). After a par, the next hole is a birdie or better about 22% of the time and a bogey or worse about 16% of the time.
 
-All four differences are under 0.35 percentage points and their intervals include zero. After a birdie or better, both another birdie and a bogey are slightly less likely, which points to a little more par, not to momentum.
+None of the six differences is statistically significant. After a birdie or better, the next-hole score is 0.0019 strokes lower, and both another birdie and a bogey are slightly less likely, so the extra outcomes go to par rather than to more birdies. The next section tests this shift directly.
 
-### Robustness: how well is player ability measured?
+For comparison, one stroke gained per hole in `player_skill` lowers the next-hole score by about 0.74 strokes, so the model does pick up real differences between players. This is smaller than we expected: a player who beats the field by one stroke per hole in other events should be about one stroke better here too. The gap comes from attenuation bias. `player_skill` is estimated from a limited number of holes, so it carries measurement noise, and the noise takes away part of the skill effect, pulling the coefficient toward zero. The robustness check below tests this with players whose skill is measured more precisely.
 
-`player_skill` is estimated from a limited number of holes, so part of it is luck. A noisy control shrinks its own coefficient toward zero: with a perfect measure, one stroke gained per hole elsewhere should mean about one stroke better here, but the main model gives about 0.74. The table refits the next-hole `to_par` model keeping only players with at least a given number of events, whose skill is measured more precisely. The first row goes the other way and adds back the 338 players who appear in only one event: their `player_skill` is set to 0, and an indicator `one_event` estimates their average level instead.
 
-```{r}
-kable(res("skill_robustness.csv"), digits = 4)
-```
+### Multinomial logit
 
-Dropping players with two to four events moves the `player_skill` coefficient from −0.74 to about −0.87, and it stays near that value with stricter cutoffs. The remaining gap from −1 likely reflects leftover noise and form that changes during the season. The one-event players score about 0.12 strokes per hole worse than a player of average skill, about two strokes per round, which fits their typical route into an event (sponsor exemptions, Monday qualifiers and club professionals). The previous-hole estimates stay within ±0.004 strokes in every sample, so the conclusion does not depend on how precisely ability is measured or on leaving these players out.
-
-### The whole next-hole distribution
-
-A multinomial logit models all five next-hole outcomes at once (eagle or better, birdie, par, bogey, double bogey or worse). Fixed effects are impractical in a logit, so the hole is controlled by its leave-one-out field average, birdie rate, and bogey rate, plus `player_skill`.
-
-It does not force a single direction, so it can detect a change in *style*, where birdies and bogeys move together. Below are the adjusted changes in each outcome's probability, in percentage points, relative to a previous par:
+The main model shows no significant changes in the average score, but the previous hole could still change the mix of outcomes. A multinomial logit models all five next-hole results at once, with the hole's field average, birdie rate, and bogey rate plus `player_skill` as controls (fixed effects are impractical in a logit). After a previous par, about 62% of next holes are pars. The adjusted changes relative to a previous par, in percentage points:
 
 ```{r}
 kable(res("multinomial_change_pp.csv"), digits = 3)
 ```
 
-After a birdie, every non-par outcome is slightly less likely, and par is about 0.8 points more likely. After a bogey, the pattern reverses: par is about 0.85 points less likely, while both birdies (+0.26) and bogeys (+0.42) become more likely. This is consistent with players taking more risks after a bogey to win the stroke back, though scores alone cannot show a change in strategy, and each shift is under one percentage point.
-
-### Formal tests
-
-Wald tests on the multinomial coefficients use player-clustered standard errors. A likelihood-ratio test would treat holes as independent, but holes from the same player are correlated.
+After a birdie, par is about 0.8 points more likely and every other outcome slightly less likely; after a bogey, par is about 0.85 points less likely while birdies (+0.26) and bogeys (+0.42) both rise. Wald tests with player-clustered standard errors reject no effect (p < 0.01):
 
 ```{r}
 kable(res("wald_tests.csv"), digits = 4)
 ```
 
-A separate test examines whether the probability of par changes, using hole fixed effects and `player_skill` as in the main model.
+This is consistent with slightly more conservative play after a birdie and more aggressive play after a bogey, though scores alone cannot show a change in strategy, and each shift is under one percentage point.
+
+## Robustness check
+
+The main model leaves out players with only one event and relies on a skill measure that contains noise. We refit the next-hole `to_par` model on different samples. The rows with a minimum of two to twenty events keep only players whose skill is estimated from more events, and therefore more precisely. The first row adds back all 692 players: missing `player_skill` values are set to zero, and a `one_event` indicator estimates a separate average for those players.
 
 ```{r}
-kable(res("par_test.csv"), digits = 4)
+kable(res("skill_robustness.csv"), digits = 4)
 ```
+
+As expected from attenuation bias, the `player_skill` coefficient moves from −0.74 to about −0.87 once players with two to four events are dropped, and stays near that value with stricter cutoffs. The one-event players score about 0.12 strokes per hole worse than a player of average skill, roughly two strokes per round. In every sample, the estimated differences after a birdie or better and after a bogey or worse stay within 0.004 strokes of zero, so the conclusion does not depend on how ability is measured or on which players are included.
 
 ## Conclusion
 
 Using 2025 PGA TOUR hole-by-hole data (44 events, about 270,000 holes with a previous hole), we find:
 
 1. **No evidence of a change in average scoring.** After accounting for hole difficulty and player skill, the next-hole differences after a birdie or a bogey are less than 0.002 strokes in magnitude, and both confidence intervals include zero.
-2. **No change in birdie or bogey chances, a small shift toward par.** None of the birdie or bogey probability differences is statistically significant. The par test and the multinomial logit show a par is about 0.6 percentage points more likely after a birdie and 0.6 points less likely after a bogey: if anything, the hole after a birdie is slightly more conservative, not hotter, and the hole after a bogey slightly more aggressive.
+2. **No change in birdie or bogey chances, a small shift toward par.** None of the birdie or bogey probability differences is statistically significant. The multinomial logit shows a par is about 0.8 percentage points more likely after a birdie and 0.85 points less likely after a bogey, and Wald tests confirm the shift is significant: if anything, the hole after a birdie is slightly more conservative, not hotter, and the hole after a bogey slightly more aggressive.
 
 As a golfer, the feeling of momentum after a birdie is real, but in this data it does not show up as better scoring on the next hole.
 
@@ -354,7 +332,7 @@ As a golfer, the feeling of momentum after a birdie is real, but in this data it
 
 - One season of data. Results could differ in other years or on other tours.
 - `course_key` (the par sequence) is only a proxy for the course, and hole number is not always playing order. Transitions between the two nines are not used.
-- `player_skill` is strokes gained from the player's other events. It is measured with noise, which shrinks its coefficient (see the robustness check), it does not capture form that changes during the season, and players with only one event have no value and are left out of the main model (adding them back with an indicator does not change the results).
-- The model only looks one hole back. Longer streaks, or a hidden "hot" state lasting several holes (a hidden Markov model), are natural next steps.
-- **Momentum versus form.** We define momentum as a hole-to-hole effect: a good result on one hole leading to a better result on the next. Confidence, feel and how well a player is striking the ball that day cannot be measured from scores. A player having a good day will score well on many holes in a row, which also creates a positive link between consecutive holes. Our estimates combine both, so they are best read as an upper bound on hole-to-hole momentum.
+- `player_skill` is based on a finite number of holes in other events and may miss changes in form during the season. Players with only one included event enter the sensitivity check through a group indicator.
+- We only look one hole back, so the analysis does not address longer streaks.
+- **Momentum and form.** The scores do not measure confidence, feel, or how well a player is striking the ball that day. Those factors can affect consecutive holes, so the model estimates an association between scores rather than isolating the effect of the previous hole.
 - **Tour professionals only.** PGA TOUR players are trained to reset after every shot and may react less to the previous hole than amateurs or college players. The results may not carry over to other levels of golf.

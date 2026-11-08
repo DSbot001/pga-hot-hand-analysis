@@ -132,8 +132,8 @@ previous hole.
 - [x] Main model (`03_model.py`): hole fixed effects + strokes-gained `player_skill`. No momentum in
   average score or in birdie/bogey chances (see `results/effects.csv`). Player fixed effects
   are not used because they bias lagged-outcome estimates downward.
-- [x] Multinomial logit (`04_multinomial.py`). Formal tests (clustered
-  Wald tests, plus P(par) with hole fixed effects) show a small but significant style effect: next-hole
-  par is about +0.6 pp more likely after a birdie+ (p = 0.03) and about 0.6 pp less likely after a bogey+ (p = 0.02)
+- [x] Multinomial logit (`04_multinomial.py`). Clustered Wald tests show a small but significant
+  style effect: next-hole par is about +0.8 pp more likely after a birdie+ and about 0.85 pp less
+  likely after a bogey+ (p < 0.01)
 - [ ] Player heterogeneity, hidden Markov model
 
