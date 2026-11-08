@@ -23,7 +23,7 @@ The numbered scripts follow the main workflow, from creating database to fitting
 | `02_build_database.R` | Combines the downloaded tournament data, loads it into SQLite, and runs `analysis.sql` to prepare the analysis dataset. |
 | `analysis.sql` | Excludes unsuitable events, keeps complete rounds, links each hole to the previous hole, and calculates measures of player ability and hole difficulty. |
 | `03_model.py` | Tests whether the previous hole’s result predicts the next hole’s score or the probability of a birdie or bogey. Compares several ways of accounting for player and hole differences. |
-| `04_ordinal.py` | Examines all five next-hole score categories together and tests whether the previous result changes the overall distribution or the chance of making par. |
+| `04_multinomial.py` | Examines all five next-hole score categories together and tests whether the previous result changes the mix of outcomes or the chance of making par. |
 | `results/` | Stores the model results as readable summaries and CSV tables used by the report. |
 | `PGA Tour Project.qmd` | Contains the full report, including the research background, data checks, model results, and conclusions. Renders to HTML. |
 | `PGA-Tour-Project.Rproj` | Opens the project in RStudio so the scripts run from the correct folder. |
@@ -53,7 +53,7 @@ Run in a terminal to fit the models and save their results in `results/`.
 
 ```bash
 python 03_model.py
-python 04_ordinal.py
+python 04_multinomial.py
 ```
 
 ### 3. Render the report
@@ -81,7 +81,13 @@ To download a fresh copy of the raw data, install the R package `golfastr` and r
 4. **`scored_holes`**: `to_par = score - par` and `nine` (front or back).
 5. **`lagged_holes`**: `prev_to_par`, the previous hole within the same nine.
    Holes 1 and 10 have none.
-6. **`analysis`**: final modeling table.
+6. **`field_totals`**: number of players and summed `to_par` on each hole
+   (event, round, course proxy, hole).
+7. **`strokes_gained`**: `hole_diff`, the other players' average `to_par` on the
+   same hole; `sg = hole_diff - to_par`, strokes gained on the hole; and each
+   player's season and per-event strokes gained totals.
+8. **`analysis`**: final modeling table. Adds `player_skill`, average strokes
+   gained per hole in the player's other events.
 
 
 ## Variables
@@ -124,10 +130,10 @@ previous hole.
 - [x] Data download, cleaning, and features
 - [x] Data quality checks (round completeness, course proxies, score labels)
 - [x] Main model (`03_model.py`): hole fixed effects + strokes-gained `player_skill`. No momentum in
-  average score or in birdie/bogey chances (see `results/model_results.md`). Player fixed effects
+  average score or in birdie/bogey chances (see `results/effects.csv`). Player fixed effects
   are not used because they bias lagged-outcome estimates downward.
-- [x] Ordered and multinomial logit (`04_ordinal.py`): no overall shift. Formal tests (clustered
+- [x] Multinomial logit (`04_multinomial.py`). Formal tests (clustered
   Wald tests, plus P(par) with hole fixed effects) show a small but significant style effect: next-hole
   par is about +0.6 pp more likely after a birdie+ (p = 0.03) and about 0.6 pp less likely after a bogey+ (p = 0.02)
-- [ ] Streaks (last k holes), player heterogeneity, hidden Markov model
+- [ ] Player heterogeneity, hidden Markov model
 

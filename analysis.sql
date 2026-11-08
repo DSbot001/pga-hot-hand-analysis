@@ -1,5 +1,7 @@
 -- Derived views are rebuilt from the raw all_holes table.
 DROP VIEW IF EXISTS analysis;
+DROP VIEW IF EXISTS strokes_gained;
+DROP VIEW IF EXISTS field_totals;
 DROP VIEW IF EXISTS lagged_holes;
 DROP VIEW IF EXISTS scored_holes;
 DROP VIEW IF EXISTS round_courses;
@@ -90,33 +92,46 @@ SELECT *,
 FROM scored_holes;
 
 
--- hole_diff: leave-one-out field average to_par on the same event, round,
---   course proxy and hole (higher = harder hole).
--- player_skill: strokes gained per hole, averaged over the player's OTHER
---   events. Strokes gained on a hole = hole_diff - to_par, so positive values
---   mean better than the field. Leaving out the current event keeps the
---   player's own scores in this event out of the skill measure.
-CREATE VIEW analysis AS
+-- Field totals for each hole: how many players played the same event, round,
+-- course proxy and hole, and their summed to_par.
+CREATE VIEW field_totals AS
 SELECT *,
- 1.0 * (tot_sg - event_sg) / NULLIF(tot_n - event_n, 0) AS player_skill
-FROM (
- SELECT *,
+    COUNT(*) OVER (PARTITION BY event_query, round, course_key, hole) AS n_field,
+    SUM(to_par) OVER (PARTITION BY event_query, round, course_key, hole) AS field_sum
+FROM lagged_holes;
+
+
+-- Inner query:
+--   hole_diff: the other players' average to_par on the same hole (the
+--     current player is left out). Higher = harder hole.
+-- Outer query:
+--   sg: strokes gained on this hole = hole_diff - to_par. Positive = better
+--     than the field.
+--   tot_sg / tot_n: the player's summed strokes gained and number of holes
+--     over the whole season. event_sg / event_n: the same within the current
+--     event.
+CREATE VIEW strokes_gained AS
+SELECT *,
+    hole_diff - to_par AS sg,
     SUM(hole_diff - to_par) OVER (PARTITION BY player_id) AS tot_sg,
     COUNT(hole_diff) OVER (PARTITION BY player_id) AS tot_n,
     SUM(hole_diff - to_par) OVER (PARTITION BY player_id, event_query) AS event_sg,
     COUNT(hole_diff) OVER (PARTITION BY player_id, event_query) AS event_n
- FROM (
-  SELECT *,
-   CASE WHEN prev_to_par IS NULL THEN NULL
-       WHEN prev_to_par <= -1 THEN 1
-       ELSE 0
-       END AS prev_birdie,
-   1.0 * (field_sum - to_par) / NULLIF(n_field - 1, 0) AS hole_diff
-  FROM (
-   SELECT *,
-      COUNT(*) OVER (PARTITION BY event_query, round, course_key, hole) AS n_field,
-      SUM(to_par) OVER (PARTITION BY event_query, round, course_key, hole) AS field_sum
-   FROM lagged_holes
-  )
- )
+FROM (
+    SELECT *,
+        CASE WHEN prev_to_par IS NULL THEN NULL
+            WHEN prev_to_par <= -1 THEN 1
+            ELSE 0
+            END AS prev_birdie,
+        1.0 * (field_sum - to_par) / NULLIF(n_field - 1, 0) AS hole_diff
+    FROM field_totals
 );
+
+
+-- player_skill: average strokes gained per hole in the player's OTHER events.
+--   Leaving out the current event keeps the scores being modeled out of the
+--   skill measure. NULL for players with only one event.
+CREATE VIEW analysis AS
+SELECT *,
+    1.0 * (tot_sg - event_sg) / NULLIF(tot_n - event_n, 0) AS player_skill
+FROM strokes_gained;
