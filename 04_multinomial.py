@@ -1,28 +1,21 @@
 """Multinomial logit for the next-hole outcome.
 
-Reads the `analysis` view from pga_2025.sqlite and writes the CSV tables in
-results/ that PGA Tour Project.qmd reads.
+Reads the `analysis` view from pga_2025.sqlite; writes CSV tables to results/
+for PGA Tour Project.qmd.
 
-Next-hole outcome:
-    0 eagle+   1 birdie   2 par   3 bogey   4 double+
-
-Previous-hole state (reference = par): birdie+, par, bogey+
+Outcome:  0 eagle+  1 birdie  2 par  3 bogey  4 double+
+Previous hole (ref = par):  birdie+, par, bogey+
 
 Controls:
-    player_skill             strokes gained per hole in other events
-    hole_diff                leave-one-out field mean to_par on the same
-                             event x round x course x hole
-    field_birdie, field_bogey  leave-one-out field share of birdie-or-better /
-                             bogey-or-worse on that same hole. In 03_model.py,
-                             hole fixed effects showed that a hole's average
-                             is not enough: its birdie and bogey rates matter
-                             too. Fixed effects are impractical in a logit, so
-                             these shares stand in for them.
+    player_skill   strokes gained per hole in other events
+    hole_diff      leave-one-out field mean to_par, same event x round x hole
+    field_birdie,  leave-one-out field share of birdie+ / bogey+ on that hole;
+    field_bogey    stand in for hole fixed effects (03_model.py showed hole
+                   birdie/bogey rates matter beyond the mean)
 
-Model (SEs clustered by player):
-    Multinomial logit   separate coefficients for each outcome vs par, so
-                        birdies and bogeys can rise or fall together (a change
-                        in style or variance), not only shift in one direction.
+Multinomial logit with player-clustered SEs: each outcome gets its own
+coefficients vs par, so birdies and bogeys can rise together (a variance /
+style shift), not just move in one direction.
 """
 
 import sqlite3
@@ -97,8 +90,8 @@ def main():
     df = load()
     clusters = df.player_id.to_numpy()
 
-    # ---- Multinomial logit (base = par) --------------------------------
-    # MNLogit uses the lowest code as base, so recode so par = 0.
+    # Multinomial logit (base = par)
+    # MNLogit uses the lowest code as base.
     order = ["par", "eagle+", "birdie", "bogey", "double+"]
     my = df.y.map({2: 0, 0: 1, 1: 2, 3: 3, 4: 4})
     mm = sm.MNLogit(my, sm.add_constant(design(df)))
@@ -115,10 +108,9 @@ def main():
     def diff_pp(pred):
         return (pred.loc[["birdie+", "bogey+"]] - pred.loc["par"]) * 100
 
-    # ---- Formal tests ---------------------------------------------------
+    # Formal tests 
     # Wald tests on the multinomial coefficients with player-clustered SEs.
-    # (A likelihood-ratio test would treat holes as independent, but holes
-    # from the same player are correlated, so Wald + clustering is used.)
+
     names = list(mres.cov_params().index)
 
     def wald(vars_):
