@@ -87,8 +87,8 @@ JOIN round_courses AS c
 CREATE VIEW lagged_holes AS
 SELECT *, 
     LAG(to_par) OVER (
-        PARTITION BY player_id, tournament_id, round, nine 
-        ORDER BY hole) AS prev_to_par 
+        PARTITION BY player_id, event_query, round, nine
+        ORDER BY hole) AS prev_to_par
 FROM scored_holes;
 
 
@@ -107,6 +107,8 @@ FROM lagged_holes;
 -- Outer query:
 --   sg: strokes gained on this hole = hole_diff - to_par. Positive = better
 --     than the field.
+--   prev_cat: previous-hole result in three groups ('birdie+', 'par',
+--     'bogey+'); NULL on holes 1 and 10.
 --   tot_sg / tot_n: the player's summed strokes gained and number of holes
 --     over the whole season. event_sg / event_n: the same within the current
 --     event.
@@ -120,9 +122,10 @@ SELECT *,
 FROM (
     SELECT *,
         CASE WHEN prev_to_par IS NULL THEN NULL
-            WHEN prev_to_par <= -1 THEN 1
-            ELSE 0
-            END AS prev_birdie,
+            WHEN prev_to_par <= -1 THEN 'birdie+'
+            WHEN prev_to_par = 0 THEN 'par'
+            ELSE 'bogey+'
+            END AS prev_cat,
         1.0 * (field_sum - to_par) / NULLIF(n_field - 1, 0) AS hole_diff
     FROM field_totals
 );

@@ -10,7 +10,7 @@ failed <- names(results)[
 ]
 
 message(
-  "Events with no data ",
+  "Events with no data: ",
   if (length(failed)) paste(failed, collapse = ", ") else "none"
 )
 
@@ -29,8 +29,9 @@ print(missing_values)
 pga_db <- dbConnect(SQLite(), "pga_2025.sqlite")
 dbWriteTable(pga_db, "all_holes", all_holes, overwrite = TRUE)
 
-# Remove line comments before splitting SQL into individual statements.
-sql_lines <- sub("--.*$", "", readLines("analysis.sql"))
+# Drop full-line comments before splitting SQL into individual statements.
+sql_lines <- readLines("analysis.sql")
+sql_lines <- sql_lines[!grepl("^\\s*--", sql_lines)]
 sql <- paste(sql_lines, collapse = "\n")
 
 for (statement in strsplit(sql, ";")[[1]]) {

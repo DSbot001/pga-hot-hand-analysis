@@ -7,3 +7,10 @@
 
 *.sqlite
 *.sqlite-journal
+
+# Editor and Python caches
+.vscode/
+__pycache__/
+
+# Quarto render leftovers (the report embeds its resources)
+*_files/

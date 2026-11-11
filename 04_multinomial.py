@@ -1,17 +1,20 @@
 """Multinomial logit for the next-hole outcome.
 
 Reads the `analysis` view from pga_2025.sqlite; writes CSV tables to results/
-for PGA Tour Project.qmd.
+for pga_hot_hand_report.qmd.
 
 Outcome:  0 eagle+  1 birdie  2 par  3 bogey  4 double+
 Previous hole (ref = par):  birdie+, par, bogey+
 
 Controls:
     player_skill   strokes gained per hole in other events
-    hole_diff      leave-one-out field mean to_par, same event x round x hole
+    hole_diff      leave-one-out field mean to_par, same event x round x
+                   course proxy x hole
     field_birdie,  leave-one-out field share of birdie+ / bogey+ on that hole;
-    field_bogey    stand in for hole fixed effects (03_model.py showed hole
-                   birdie/bogey rates matter beyond the mean)
+    field_bogey    together with hole_diff they stand in for hole fixed
+                   effects, which are impractical in a logit. Two holes with
+                   the same average can still differ in how often they give
+                   up birdies and bogeys.
 
 Multinomial logit with player-clustered SEs: each outcome gets its own
 coefficients vs par, so birdies and bogeys can rise together (a variance /
@@ -39,7 +42,7 @@ def load():
         df = pd.read_sql_query(
             """
             SELECT player_id, event_query, round, course_key, hole,
-                   to_par, prev_to_par, hole_diff, player_skill
+                   to_par, prev_cat, hole_diff, player_skill
             FROM analysis
             """,
             con,
@@ -55,13 +58,10 @@ def load():
     df["field_birdie"] = (g.is_birdie.transform("sum") - df.is_birdie) / (n - 1)
     df["field_bogey"] = (g.is_bogey.transform("sum") - df.is_bogey) / (n - 1)
 
-    df = df.dropna(subset=["prev_to_par", "player_skill"]).reset_index(drop=True)
+    df = df.dropna(subset=["prev_cat", "player_skill"]).reset_index(drop=True)
     df["y"] = np.select(
         [df.to_par <= -2, df.to_par == -1, df.to_par == 0, df.to_par == 1],
         [0, 1, 2, 3], 4,
-    )
-    df["prev_cat"] = np.select(
-        [df.prev_to_par <= -1, df.prev_to_par == 0], ["birdie+", "par"], "bogey+"
     )
     df["prev_birdie"] = (df.prev_cat == "birdie+").astype(float)
     df["prev_bogey"] = (df.prev_cat == "bogey+").astype(float)
@@ -90,9 +90,8 @@ def main():
     df = load()
     clusters = df.player_id.to_numpy()
 
-    # Multinomial logit (base = par)
-    # MNLogit uses the lowest code as base.
-    order = ["par", "eagle+", "birdie", "bogey", "double+"]
+    # Multinomial logit (base = par). MNLogit uses the lowest code as base,
+    # so recode to par 0, eagle+ 1, birdie 2, bogey 3, double+ 4.
     my = df.y.map({2: 0, 0: 1, 1: 2, 3: 3, 4: 4})
     mm = sm.MNLogit(my, sm.add_constant(design(df)))
     mres = mm.fit(method="newton", maxiter=100, disp=False,
@@ -126,7 +125,7 @@ def main():
         "H0: previous bogey+ has no effect": wald(["prev_bogey"]),
     }).T
 
-    # CSVs read by the Results section of PGA Tour Project.qmd
+    # CSVs read by the Results section of pga_hot_hand_report.qmd
     diff_pp(m_pred).to_csv(OUT / "multinomial_change_pp.csv", index_label="previous_hole")
     tests.to_csv(OUT / "wald_tests.csv", index_label="hypothesis")
 

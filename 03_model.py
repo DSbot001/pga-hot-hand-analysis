@@ -2,7 +2,7 @@
 
 Input:  `analysis` view in pga_2025.sqlite (built by 02_build_database.R)
 Output: results/effects.csv, results/skill_robustness.csv
-        (read by PGA Tour Project.qmd)
+        (read by pga_hot_hand_report.qmd)
 
 Model (OLS, linear probability for the 0/1 outcomes):
     outcome ~ prev_cat + hole fixed effects + player_skill
@@ -26,6 +26,7 @@ OUTCOMES = {
     "to_par": "Next-hole to_par",
     "birdie_next": "P(birdie or better next)",
     "bogey_next": "P(bogey or worse next)",
+    "par_next": "P(par next)",
 }
 
 
@@ -34,17 +35,15 @@ def load():
         df = pd.read_sql_query(
             """
             SELECT player_id, event_query, round, course_key, hole, to_par,
-                   prev_to_par, player_skill
+                   prev_cat, player_skill
             FROM analysis
-            WHERE prev_to_par IS NOT NULL
+            WHERE prev_cat IS NOT NULL
             """,
             con,
         )
-    df["prev_cat"] = np.select(
-        [df.prev_to_par <= -1, df.prev_to_par == 0], ["birdie+", "par"], "bogey+"
-    )
     df["birdie_next"] = (df.to_par <= -1).astype(int)
     df["bogey_next"] = (df.to_par >= 1).astype(int)
+    df["par_next"] = (df.to_par == 0).astype(int)
     return df
 
 

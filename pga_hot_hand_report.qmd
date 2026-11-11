@@ -1,14 +1,15 @@
 ---
-title: "PGA Tour Momentum Project"
+title: "PGA Tour Hot Hand Analysis"
 format:
   html:
     code-fold: true
+    embed-resources: true
 editor: source
 ---
 
 ## The Purpose of the Project
 
-In the world of golf, players often feel that one good hole can build confidence and lead to another. As both an NCAA Division I golfer and a data science student, I wanted to see whether this “hot hand” feeling shows up in the data, or whether apparent streaks can be explained by player ability and hole difficulty. And our research question is: **Is making a birdie or better associated with a better score on the next hole, after accounting for player ability and hole difficulty?**  
+In the world of golf, players often feel that one good hole can build confidence and lead to another. As both an NCAA Division I golfer and a data science student, I wanted to see whether this “hot hand” feeling shows up in the data, or whether apparent streaks can be explained by player ability and hole difficulty. My research question is: **Is making a birdie or better associated with a better score on the next hole, after accounting for player ability and hole difficulty?**  
 
 ## Data and a little golf background
 
@@ -27,7 +28,7 @@ Each row represents one player's score on one hole in one tournament round. A ro
 | Triple bogey | +3 | 8 |
 | Other | A separate category checked against the recorded score | — |
 
-For the analysis, we calculate `to_par = score - par` directly from the numeric scores. The sections below check the data and analysis variables before presenting the model results.
+For the analysis, I calculate `to_par = score - par` directly from the numeric scores. The sections below check the data and analysis variables before presenting the model results.
 
 
 ## Prepare the database
@@ -46,7 +47,7 @@ pga_db <- dbConnect(SQLite(), "pga_2025.sqlite")
 
 ## Data coverage and excluded events
 
-Of the 49 events on the 2025 leaderboard, the Ryder Cup returned no hole data. We excluded four events with formats outside the scope of this analysis: Zurich Classic (team play), Q-School (qualifying), Hero World Challenge (unofficial invitational), and Barracuda Championship (Stableford points rather than stroke scores), leaving 44 events.
+Of the 49 events on the 2025 leaderboard, the Ryder Cup returned no hole data. I excluded four events with formats outside the scope of this analysis: Zurich Classic (team play), Q-School (qualifying), Hero World Challenge (unofficial invitational), and Barracuda Championship (Stableford points rather than stroke scores), leaving 44 events.
 
 
 ```{r}
@@ -84,7 +85,7 @@ After excluding four ineligible events, 41 playoff records and 475 incomplete ro
 
 ## Data quality checks
 
-We check for duplicates, missing or invalid values, inconsistent event identifiers, incomplete rounds, and unexpected gaps in previous-hole scores. We also compare score labels with `score - par`.
+I check for duplicates, missing or invalid values, inconsistent event identifiers, incomplete rounds, and unexpected gaps in previous-hole scores. I also compare score labels with `score - par`. The raw data has 4,176 records with a missing `player_name`; the analysis identifies players by `player_id`, which is never missing, so these records are kept.
 
 
 ```{r}
@@ -189,7 +190,7 @@ dbGetQuery(pga_db, "
 ")
 ```
 
-We use each round’s 18-hole par sequence as a course proxy to avoid comparing scores from different courses when estimating hole difficulty. Across all four multi-course events, the number of unique sequences matches the official course count. This supports the proxy’s use to keep scores from different courses separate.
+I use each round’s 18-hole par sequence as a course proxy to avoid comparing scores from different courses when estimating hole difficulty. Across all four multi-course events, the number of unique sequences matches the official course count. This supports the proxy’s use to keep scores from different courses separate.
 
 
 ## Analysis features
@@ -204,7 +205,7 @@ The SQL views turn each hole score into the variables used in the analysis.
 | `sg` | Strokes gained against the field on that hole, calculated as `hole_diff - to_par`. Positive values mean the player scored better than the other players' average. |
 | `player_skill` | The player's average `sg` per hole across their other included events. Higher values indicate better scoring relative to the field. |
 
-We estimate `player_skill` from the player's other events. This keeps the scores we are trying to explain out of the skill estimate.
+I estimate `player_skill` from the player's other events. This keeps the scores I am trying to explain out of the skill estimate.
 
 ```{r}
 dbGetQuery(pga_db, "
@@ -218,9 +219,9 @@ dbGetQuery(pga_db, "
 
 ```
 
-The data do not identify each player's starting hole. We link consecutive holes within each nine and leave the previous score blank for holes 1 and 10. This leaves 270,032 records for the raw comparisons.
+The data do not identify each player's starting hole. I link consecutive holes within each nine and leave the previous score blank for holes 1 and 10. This leaves 270,032 records for the raw comparisons.
 
-Of those records, 13,040 belong to the 338 players who appear in only one included event and have no `player_skill` value. The main model uses the remaining 256,992 records from 354 players. The scoring sensitivity check below adds the one-event players back.
+Of those records, 13,040 belong to the 338 players who appear in only one included event and have no `player_skill` value. The main model uses the remaining 256,992 records from 354 players. The robustness check below adds the one-event players back.
 
 ```{r}
 dbGetQuery(pga_db, "
@@ -286,11 +287,11 @@ kable(eff[eff$`previous hole` != "player_skill",
       digits = 4, row.names = FALSE)
 ```
 
-The first two rows are in strokes; the probability rows are proportions (−0.0028 = −0.28 percentage points). After a par, the next hole is a birdie or better about 22% of the time and a bogey or worse about 16% of the time.
+The first two rows are in strokes; the probability rows are proportions (−0.0028 = −0.28 percentage points). After a par, the next hole is a birdie or better about 22% of the time, a par about 62% of the time, and a bogey or worse about 16% of the time.
 
-None of the six differences is statistically significant. After a birdie or better, the next-hole score is 0.0019 strokes lower, and both another birdie and a bogey are slightly less likely, so the extra outcomes go to par rather than to more birdies. The next section tests this shift directly.
+The average score and the chances of a birdie or a bogey show no statistically significant difference (the first six rows). After a birdie or better, the next-hole score is 0.0019 strokes lower, and both another birdie and a bogey are slightly less likely, so the extra outcomes go to par rather than to more birdies. The last two rows check this directly: after a birdie or better, a par is about 0.56 percentage points more likely, and after a bogey or worse about 0.62 points less likely (p ≈ 0.03 and 0.02). With four outcomes and two previous-hole states tested, these p-values are best read as borderline. The next section models all outcomes together.
 
-For comparison, one stroke gained per hole in `player_skill` lowers the next-hole score by about 0.74 strokes, so the model does pick up real differences between players. This is smaller than we expected: a player who beats the field by one stroke per hole in other events should be about one stroke better here too. The gap comes from attenuation bias. `player_skill` is estimated from a limited number of holes, so it carries measurement noise, and the noise takes away part of the skill effect, pulling the coefficient toward zero. The robustness check below tests this with players whose skill is measured more precisely.
+For comparison, one stroke gained per hole in `player_skill` lowers the next-hole score by about 0.74 strokes, so the model does pick up real differences between players. This is smaller than I expected: a player who beats the field by one stroke per hole in other events should be about one stroke better here too. The gap comes from attenuation bias. `player_skill` is estimated from a limited number of holes, so it carries measurement noise, and the noise takes away part of the skill effect, pulling the coefficient toward zero. The robustness check below tests this with players whose skill is measured more precisely.
 
 
 ### Multinomial logit
@@ -301,17 +302,19 @@ The main model shows no significant changes in the average score, but the previo
 kable(res("multinomial_change_pp.csv"), digits = 3)
 ```
 
-After a birdie, par is about 0.8 points more likely and every other outcome slightly less likely; after a bogey, par is about 0.85 points less likely while birdies (+0.26) and bogeys (+0.42) both rise. Wald tests with player-clustered standard errors reject no effect (p < 0.01):
+After a birdie, par is about 0.8 points more likely and every other outcome slightly less likely; after a bogey, par is about 0.85 points less likely while birdies (+0.26) and bogeys (+0.42) both rise. These are point estimates for each category; the evidence that the mix changes comes from Wald tests on all categories together, with player-clustered standard errors, which reject no effect (p < 0.01):
 
 ```{r}
-kable(res("wald_tests.csv"), digits = 4)
+wald <- res("wald_tests.csv")
+wald$p_value <- format.pval(wald$p_value, digits = 2, eps = 1e-4)
+kable(wald, digits = 2)
 ```
 
-This is consistent with slightly more conservative play after a birdie and more aggressive play after a bogey, though scores alone cannot show a change in strategy, and each shift is under one percentage point.
+This is consistent with slightly more conservative play after a birdie and more aggressive play after a bogey, and it agrees in direction and size with the P(par next) rows of the linear model, which uses full hole fixed effects. Scores alone cannot show a change in strategy, and each shift is under one percentage point.
 
 ## Robustness check
 
-The main model leaves out players with only one event and relies on a skill measure that contains noise. We refit the next-hole `to_par` model on different samples. The rows with a minimum of two to twenty events keep only players whose skill is estimated from more events, and therefore more precisely. The first row adds back all 692 players: missing `player_skill` values are set to zero, and a `one_event` indicator estimates a separate average for those players.
+The main model leaves out players with only one event and relies on a skill measure that contains noise. I refit the next-hole `to_par` model on different samples. The rows with a minimum of two to twenty events keep only players whose skill is estimated from more events, and therefore more precisely. The first row adds back all 692 players: missing `player_skill` values are set to zero, and a `one_event` indicator estimates a separate average for those players.
 
 ```{r}
 kable(res("skill_robustness.csv"), digits = 4)
@@ -321,10 +324,10 @@ As expected from attenuation bias, the `player_skill` coefficient moves from −
 
 ## Conclusion
 
-Using 2025 PGA TOUR hole-by-hole data (44 events, about 270,000 holes with a previous hole), we find:
+Using 2025 PGA TOUR hole-by-hole data (44 events, about 270,000 holes with a previous hole), I find:
 
 1. **No evidence of a change in average scoring.** After accounting for hole difficulty and player skill, the next-hole differences after a birdie or a bogey are less than 0.002 strokes in magnitude, and both confidence intervals include zero.
-2. **No change in birdie or bogey chances, a small shift toward par.** None of the birdie or bogey probability differences is statistically significant. The multinomial logit shows a par is about 0.8 percentage points more likely after a birdie and 0.85 points less likely after a bogey, and Wald tests confirm the shift is significant: if anything, the hole after a birdie is slightly more conservative, not hotter, and the hole after a bogey slightly more aggressive.
+2. **A small change in the mix of outcomes.** Taken one at a time, neither the chance of a birdie nor the chance of a bogey changes significantly. Taken together, the mix does shift: a par is about 0.6 to 0.8 percentage points more likely after a birdie and about 0.6 to 0.85 points less likely after a bogey (linear model and multinomial logit), and the joint Wald tests reject no change (p < 0.01). If anything, the hole after a birdie is slightly more conservative, not hotter, and the hole after a bogey slightly more aggressive. The shift is small, and borderline when each outcome is tested on its own.
 
 As a golfer, the feeling of momentum after a birdie is real, but in this data it does not show up as better scoring on the next hole.
 
@@ -332,7 +335,7 @@ As a golfer, the feeling of momentum after a birdie is real, but in this data it
 
 - One season of data. Results could differ in other years or on other tours.
 - `course_key` (the par sequence) is only a proxy for the course, and hole number is not always playing order. Transitions between the two nines are not used.
-- `player_skill` is based on a finite number of holes in other events and may miss changes in form during the season. Players with only one included event enter the sensitivity check through a group indicator.
-- We only look one hole back, so the analysis does not address longer streaks.
+- `player_skill` is based on a finite number of holes in other events and may miss changes in form during the season. Players with only one included event enter the robustness check through a group indicator.
+- I only look one hole back, so the analysis does not address longer streaks.
 - **Momentum and form.** The scores do not measure confidence, feel, or how well a player is striking the ball that day. Those factors can affect consecutive holes, so the model estimates an association between scores rather than isolating the effect of the previous hole.
 - **Tour professionals only.** PGA TOUR players are trained to reset after every shot and may react less to the previous hole than amateurs or college players. The results may not carry over to other levels of golf.

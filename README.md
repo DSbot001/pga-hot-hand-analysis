@@ -1,4 +1,4 @@
-# PGA Hot Hand Analysis
+# PGA Tour Hot Hand Analysis
 
 Does playing well on one hole help a golfer play better on the next?
 
@@ -22,11 +22,12 @@ The numbered scripts follow the main workflow, from creating database to fitting
 | `holes_2025_raw.rds` | Contains the downloaded data. Each hole record represents one player’s score on one hole in one round. |
 | `02_build_database.R` | Combines the downloaded tournament data, loads it into SQLite, and runs `analysis.sql` to prepare the analysis dataset. |
 | `analysis.sql` | Excludes unsuitable events, keeps complete rounds, links each hole to the previous hole, and calculates measures of player ability and hole difficulty. |
-| `03_model.py` | Main model. Tests whether the previous hole’s result predicts the next hole’s score or the probability of a birdie or bogey, using hole fixed effects and `player_skill`. Also runs the robustness check on the skill measure. |
+| `03_model.py` | Main model. Tests whether the previous hole’s result predicts the next hole’s score or the probability of a birdie, par, or bogey, using hole fixed effects and `player_skill`. Also runs the robustness check on the skill measure. |
 | `04_multinomial.py` | Examines all five next-hole score categories together and tests whether the previous result changes the mix of outcomes. |
 | `results/` | Stores the model results as CSV tables read by the report. |
-| `PGA Tour Project.qmd` | Contains the full report, including the research background, data checks, model results, and conclusions. Renders to HTML. |
-| `PGA-Tour-Project.Rproj` | Opens the project in RStudio so the scripts run from the correct folder. |
+| `pga_hot_hand_report.qmd` | Contains the full report, including the research background, data checks, model results, and conclusions. |
+| `pga_hot_hand_report.html` | The rendered report. Download it and open it in a browser to read the results without running anything. |
+| `pga-hot-hand-analysis.Rproj` | Opens the project in RStudio so the scripts run from the correct folder. |
 
 Running `02_build_database.R` creates `pga_2025.sqlite` locally. This generated database is excluded from Git because it can be rebuilt from the saved raw data and SQL script.
 
@@ -61,7 +62,7 @@ python 04_multinomial.py
 Run in a terminal to generate the HTML report using the saved results.
 
 ```bash
-quarto render "PGA Tour Project.qmd"
+quarto render pga_hot_hand_report.qmd
 ```
 
 To download a fresh copy of the raw data, install the R package `golfastr` and run `01_download.R` before these steps.
@@ -84,8 +85,9 @@ To download a fresh copy of the raw data, install the R package `golfastr` and r
 6. **`field_totals`**: number of players and summed `to_par` on each hole
    (event, round, course proxy, hole).
 7. **`strokes_gained`**: `hole_diff`, the other players' average `to_par` on the
-   same hole; `sg = hole_diff - to_par`, strokes gained on the hole; and each
-   player's season and per-event strokes gained totals.
+   same hole; `sg = hole_diff - to_par`, strokes gained on the hole; `prev_cat`,
+   the previous-hole result in three groups; and each player's season and
+   per-event strokes gained totals.
 8. **`analysis`**: final modeling table. Adds `player_skill`, average strokes
    gained per hole in the player's other events.
 
@@ -100,7 +102,7 @@ The key variables in the `analysis` view are listed below. Each row represents o
 | `par` | The reference number of strokes for the current hole. | A score below par is better than par. |
 | `to_par` | `score - par` on the current hole. | Lower is better. A birdie is -1, par is 0, and a bogey is +1. |
 | `prev_to_par` | The player's `to_par` on the preceding hole within the same nine. | Lower means a better previous-hole result. Missing on holes 1 and 10. |
-| `prev_birdie` | An indicator for whether `prev_to_par` is -1 or lower. | 1 means birdie or better, including eagles. 0 means par or worse. Missing on holes 1 and 10. |
+| `prev_cat` | The previous-hole result in three groups: `birdie+` (`prev_to_par` of -1 or lower), `par`, and `bogey+` (+1 or higher). | The models compare `birdie+` and `bogey+` with `par`. Missing on holes 1 and 10. |
 | `hole_diff` | The average `to_par` of the other players in the analysis sample on the same event, round, course proxy, and hole. The current player's score is excluded. | Higher means harder relative to par. Negative values mean the other players averaged below par, and positive values mean they averaged above par. Missing if no other player is available for comparison. |
 | `player_skill` | The player's strokes gained per hole in their other included events, where strokes gained on a hole is `hole_diff - to_par`. The entire current event is excluded. | Higher is better: strokes better than the field per hole. Missing if the player has no observations in other included events. |
 | `course_key` | The sequence of pars for holes 1 through 18 in a player-round. | A proxy used to distinguish courses within an event, not a guaranteed unique course identifier. |
@@ -115,7 +117,7 @@ previous hole.
 ## Models
 
 **Main model (`03_model.py`).** For each next-hole outcome (strokes relative to par,
-birdie or better, bogey or worse), an OLS regression with hole fixed effects:
+birdie or better, par, bogey or worse), an OLS regression with hole fixed effects:
 
     outcome ~ birdie+_prev + bogey+_prev + hole fixed effects + player_skill
 
@@ -140,12 +142,13 @@ Wald tests check whether the previous hole changes the mix of outcomes.
 ## Conclusions
 
 - **No hot hand.** After accounting for hole difficulty and player skill, the next-hole score
-  after a birdie or better differs from the score after a par by less than 0.002 strokes, and no
-  change in birdie or bogey chances is statistically significant.
-- **A small change in style.** After a birdie, players seem to play slightly safer and make
-  about 0.8 percentage points more pars. After a bogey, they seem to play more aggressively,
-  with fewer pars and more birdies and bogeys. The shift is significant (Wald p < 0.01) but
-  small, and scores alone cannot show what players intended.
+  after a birdie or better differs from the score after a par by less than 0.002 strokes. Taken
+  one at a time, neither the chance of a birdie nor the chance of a bogey changes significantly.
+- **A small change in the mix of outcomes.** After a birdie, a par is about 0.6 to 0.8 percentage
+  points more likely; after a bogey, about 0.6 to 0.85 points less likely, with slightly more
+  birdies and bogeys. The joint Wald tests are significant (p < 0.01), but tested outcome by outcome
+  the shift is borderline (p ≈ 0.02 to 0.03). It is consistent with safer play after a birdie and more aggressive play
+  after a bogey, though scores alone cannot show what players intended.
 
 ## Limitations
 
